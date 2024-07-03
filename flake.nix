@@ -12,9 +12,11 @@
       let
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-      in with pkgs; {
+      in
+      with pkgs; {
         devShells.default = mkShell {
           buildInputs = [
+            cargo-nextest
             pkg-config
             (rust-bin.stable.latest.default.override {
               extensions = [ "rust-src" "rust-analyzer-preview" ];
