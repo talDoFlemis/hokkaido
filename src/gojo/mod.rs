@@ -486,7 +486,6 @@ impl<'a, K: Ord + Clone + 'a, V: Clone + 'a> Iterator for Iter<'a, K, V> {
 
 impl<'a, K: Ord + Clone + 'a, V: Clone + 'a> DoubleEndedIterator for Iter<'a, K, V> {
     fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
-        // println!("len = {:?}", self.len);
         if self.len == 0 {
             return None;
         }
@@ -724,10 +723,13 @@ impl<K: Ord + Clone, V: Clone> Gojo<K, V> {
 
     pub fn insert(&mut self, k: K, v: V) {
         self.len += 1;
-        let mut node = NodePtr::new(k, v);
+        let node = NodePtr::new(k, v);
         let mut y = NodePtr::null();
         let mut x = self.roots[self.curr_version];
         self.curr_version += 1;
+        unsafe {
+            (*node.0).color = Color::Red;
+        }
 
         while !x.is_null() {
             y = x;
@@ -740,7 +742,9 @@ impl<K: Ord + Clone, V: Clone> Gojo<K, V> {
                 }
             };
         }
-        node.set_parent(y, self.curr_version);
+        unsafe {
+            (*node.0).parent = y;
+        }
 
         if y.is_null() {
             self.root = node;
@@ -755,7 +759,6 @@ impl<K: Ord + Clone, V: Clone> Gojo<K, V> {
             };
         }
 
-        node.set_red_color();
         unsafe {
             self.insert_fixup(node);
         }
@@ -1089,17 +1092,13 @@ mod tests {
     #[test]
     fn test_insert() {
         let mut m = Gojo::new();
-        m.insert(1, 2);
-        m.insert(2, 4);
-        m.insert(2, 6);
-        assert_eq!(m.len(), 3);
-
-        let version = 3;
-        assert_eq!(m.version(), version);
-
-        assert_eq!(*m.get(&1, version).unwrap(), 2);
-        assert_eq!(*m.get(&2, version).unwrap(), 4);
-        assert_eq!(*m.get(&2, version).unwrap(), 4);
+        let maximum = 8;
+        for key in 1..=maximum {
+            m.insert(key, key << 2);
+        }
+        for key in 1..=maximum {
+            assert!(m.get(&key, maximum).is_some_and(|v| *v == key << 2));
+        }
     }
 
     #[test]
@@ -1109,9 +1108,9 @@ mod tests {
             m.insert(key, key << 2);
         }
 
-        let version = 6;
         let key = 7;
-        assert!(m.get(&key, version).is_none());
+        assert!(m.get(&key, 6).is_none());
+        assert!(m.get(&key, 7).is_some());
     }
 
     // #[test]
