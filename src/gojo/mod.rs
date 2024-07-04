@@ -185,21 +185,34 @@ impl<K: Ord + Clone, V: Clone> NodePtr<K, V> {
         if self.is_null() {
             return Color::Black;
         }
-        unsafe { (*self.0).color }
+        unsafe {
+            let mut value = (*self.0).color;
+            for m in (*self.0).mods.iter() {
+                if m.version > version {
+                    break;
+                }
+                if let ModData::Col(d) = m.data {
+                    value = d;
+                }
+            }
+            value
+        }
     }
 
     fn is_red_color(&self, version: usize) -> bool {
         if self.is_null() {
             return false;
         }
-        unsafe { (*self.0).color == Color::Red }
+        let color = self.get_color(version);
+        color == Color::Red
     }
 
     fn is_black_color(&self, version: usize) -> bool {
         if self.is_null() {
             return true;
         }
-        unsafe { (*self.0).color == Color::Black }
+        let color = self.get_color(version);
+        color == Color::Black
     }
 
     fn is_left_child(&self, version: usize) -> bool {
