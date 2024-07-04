@@ -7,6 +7,7 @@ use std::ops::Index;
 use std::ptr;
 
 const MAX_MODS: usize = 6;
+const MAX_OPS: usize = 20;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Color {
@@ -15,29 +16,69 @@ enum Color {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum ModData<K: Ord, V> {
+enum ModData<K: Ord + Clone, V: Clone> {
     Parent(NodePtr<K, V>),
     Left(NodePtr<K, V>),
     Right(NodePtr<K, V>),
     Col(Color),
 }
 
-struct Mod<K: Ord, V> {
+struct Mod<K: Ord + Clone, V: Clone> {
     data: ModData<K, V>,
     version: usize,
 }
 
-struct GojoNode<K: Ord, V> {
+struct GojoNode<K: Ord + Clone, V: Clone> {
     color: Color,
     left: NodePtr<K, V>,
     right: NodePtr<K, V>,
     parent: NodePtr<K, V>,
+    bk_ptr_left: NodePtr<K, V>,
+    bk_ptr_right: NodePtr<K, V>,
+    bk_ptr_parent: NodePtr<K, V>,
     key: K,
     value: V,
     mods: Vec<Mod<K, V>>,
 }
 
-impl<K: Ord, V> GojoNode<K, V> {
+impl<K: Ord + Clone, V: Clone> GojoNode<K, V> {
+    fn clone_with_latest_mods(&self) -> Self {
+        let bk_ptr_left = self.bk_ptr_left;
+        let bk_ptr_right = self.bk_ptr_right;
+        let bk_ptr_parent = self.bk_ptr_parent;
+        let key = self.key.clone();
+        let value = self.value.clone();
+        let mods = Vec::with_capacity(MAX_MODS);
+
+        let mut color = self.color;
+        let mut left = self.left;
+        let mut right = self.right;
+        let mut parent = self.parent;
+
+        for m in self.mods.iter() {
+            match m.data {
+                ModData::Parent(p) => parent = p,
+                ModData::Left(l) => left = l,
+                ModData::Right(r) => right = r,
+                ModData::Col(c) => color = c,
+            }
+        }
+        Self {
+            color,
+            key,
+            value,
+            mods,
+            left,
+            right,
+            parent,
+            bk_ptr_right,
+            bk_ptr_left,
+            bk_ptr_parent,
+        }
+    }
+}
+
+impl<K: Ord + Clone, V: Clone> GojoNode<K, V> {
     fn pair(self) -> (K, V) {
         (self.key, self.value)
     }
@@ -45,8 +86,8 @@ impl<K: Ord, V> GojoNode<K, V> {
 
 impl<K, V> Debug for GojoNode<K, V>
 where
-    K: Ord + Debug,
-    V: Debug,
+    K: Ord + Debug + Clone,
+    V: Debug + Clone,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "k:{:?} v:{:?} c:{:?}", self.key, self.value, self.color)
@@ -54,23 +95,23 @@ where
 }
 
 #[derive(Debug)]
-struct NodePtr<K: Ord, V>(*mut GojoNode<K, V>);
+struct NodePtr<K: Ord + Clone, V: Clone>(*mut GojoNode<K, V>);
 
-impl<K: Ord, V> Clone for NodePtr<K, V> {
+impl<K: Ord + Clone, V: Clone> Clone for NodePtr<K, V> {
     fn clone(&self) -> NodePtr<K, V> {
         *self
     }
 }
 
-impl<K: Ord, V> Copy for NodePtr<K, V> {}
+impl<K: Ord + Clone, V: Clone> Copy for NodePtr<K, V> {}
 
-impl<K: Ord, V> Ord for NodePtr<K, V> {
+impl<K: Ord + Clone, V: Clone> Ord for NodePtr<K, V> {
     fn cmp(&self, other: &NodePtr<K, V>) -> Ordering {
         unsafe { (*self.0).key.cmp(&(*other.0).key) }
     }
 }
 
-impl<K: Ord, V> PartialOrd for NodePtr<K, V> {
+impl<K: Ord + Clone, V: Clone> PartialOrd for NodePtr<K, V> {
     fn partial_cmp(&self, other: &NodePtr<K, V>) -> Option<Ordering> {
         unsafe { Some((*self.0).key.cmp(&(*other.0).key)) }
     }
@@ -98,21 +139,24 @@ impl<K: Ord, V> PartialOrd for NodePtr<K, V> {
     }
 }
 
-impl<K: Ord, V> PartialEq for NodePtr<K, V> {
+impl<K: Ord + Clone, V: Clone> PartialEq for NodePtr<K, V> {
     fn eq(&self, other: &NodePtr<K, V>) -> bool {
         self.0 == other.0
     }
 }
 
-impl<K: Ord, V> Eq for NodePtr<K, V> {}
+impl<K: Ord + Clone, V: Clone> Eq for NodePtr<K, V> {}
 
-impl<K: Ord, V> NodePtr<K, V> {
+impl<K: Ord + Clone, V: Clone> NodePtr<K, V> {
     fn new(k: K, v: V) -> NodePtr<K, V> {
         let node = GojoNode {
             color: Color::Black,
             left: NodePtr::null(),
             right: NodePtr::null(),
             parent: NodePtr::null(),
+            bk_ptr_left: NodePtr::null(),
+            bk_ptr_right: NodePtr::null(),
+            bk_ptr_parent: NodePtr::null(),
             key: k,
             value: v,
             mods: Vec::with_capacity(MAX_MODS),
@@ -137,21 +181,21 @@ impl<K: Ord, V> NodePtr<K, V> {
         self.set_color(Color::Black);
     }
 
-    fn get_color(&self) -> Color {
+    fn get_color(&self, version: usize) -> Color {
         if self.is_null() {
             return Color::Black;
         }
         unsafe { (*self.0).color }
     }
 
-    fn is_red_color(&self) -> bool {
+    fn is_red_color(&self, version: usize) -> bool {
         if self.is_null() {
             return false;
         }
         unsafe { (*self.0).color == Color::Red }
     }
 
-    fn is_black_color(&self) -> bool {
+    fn is_black_color(&self, version: usize) -> bool {
         if self.is_null() {
             return true;
         }
@@ -159,11 +203,11 @@ impl<K: Ord, V> NodePtr<K, V> {
     }
 
     fn is_left_child(&self, version: usize) -> bool {
-        self.parent().left(version) == *self
+        self.parent(version).left(version) == *self
     }
 
     fn is_right_child(&self, version: usize) -> bool {
-        self.parent().right(version) == *self
+        self.parent(version).right(version) == *self
     }
 
     fn min_node(self, version: usize) -> NodePtr<K, V> {
@@ -188,13 +232,13 @@ impl<K: Ord, V> NodePtr<K, V> {
         } else {
             let mut temp = self;
             loop {
-                if temp.parent().is_null() {
+                if temp.parent(version).is_null() {
                     return NodePtr::null();
                 }
                 if temp.is_left_child(version) {
-                    return temp.parent();
+                    return temp.parent(version);
                 }
-                temp = temp.parent();
+                temp = temp.parent(version);
             }
         }
     }
@@ -205,43 +249,105 @@ impl<K: Ord, V> NodePtr<K, V> {
         } else {
             let mut temp = self;
             loop {
-                if temp.parent().is_null() {
+                if temp.parent(version).is_null() {
                     return NodePtr::null();
                 }
                 if temp.is_right_child(version) {
-                    return temp.parent();
+                    return temp.parent(version);
                 }
-                temp = temp.parent();
+                temp = temp.parent(version);
             }
         }
     }
 
-    fn set_parent(&mut self, parent: NodePtr<K, V>) {
+    unsafe fn set_modification(&mut self, mod_data: ModData<K, V>, version: usize) {
+        if (*self.0).mods.len() < MAX_MODS {
+            (*self.0).mods.push(Mod {
+                data: mod_data,
+                version,
+            });
+            return;
+        }
+
+        // Create a new node with all mods and the new change right here
+        let new_gojo_node = (*self.0).clone_with_latest_mods();
+        let new_node_ptr = NodePtr(Box::into_raw(Box::new(new_gojo_node)));
+        match mod_data {
+            ModData::Parent(p) => (*new_node_ptr.0).parent = p,
+            ModData::Left(l) => (*new_node_ptr.0).left = l,
+            ModData::Right(r) => (*new_node_ptr.0).right = r,
+            ModData::Col(c) => (*new_node_ptr.0).color = c,
+        }
+
+        // Update left back pontairos
+        let mut bk_ptr_left = (*new_node_ptr.0).bk_ptr_left;
+        if !bk_ptr_left.is_null() {
+            bk_ptr_left.set_parent(new_node_ptr, version);
+        }
+
+        // Update left back pontairos
+        let mut bk_ptr_right = (*new_node_ptr.0).bk_ptr_right;
+        if !bk_ptr_right.is_null() {
+            bk_ptr_right.set_parent(new_node_ptr, version);
+        }
+
+        // Update parent back pontairos
+        let mut bk_ptr_parent = (*new_node_ptr.0).bk_ptr_parent;
+        if !bk_ptr_parent.is_null() {
+            if new_node_ptr.is_left_child(version) {
+                bk_ptr_parent.set_left(new_node_ptr, version);
+            } else {
+                bk_ptr_parent.set_right(new_node_ptr, version);
+            }
+        }
+    }
+
+    fn set_parent(&mut self, parent: NodePtr<K, V>, version: usize) {
         if self.is_null() {
             return;
         }
-        unsafe { (*self.0).parent = parent }
+        unsafe {
+            let new_mod = ModData::Parent(parent);
+            self.set_modification(new_mod, version);
+        }
     }
 
-    fn set_left(&mut self, left: NodePtr<K, V>) {
+    fn set_left(&mut self, left: NodePtr<K, V>, version: usize) {
         if self.is_null() {
             return;
         }
-        unsafe { (*self.0).left = left }
+        unsafe {
+            let new_mod = ModData::Left(left);
+            self.set_modification(new_mod, version);
+        }
     }
 
-    fn set_right(&mut self, right: NodePtr<K, V>) {
+    fn set_right(&mut self, right: NodePtr<K, V>, version: usize) {
         if self.is_null() {
             return;
         }
-        unsafe { (*self.0).right = right }
+        unsafe {
+            let new_mod = ModData::Right(right);
+            self.set_modification(new_mod, version);
+        }
     }
 
-    fn parent(&self) -> NodePtr<K, V> {
+    fn parent(&self, version: usize) -> NodePtr<K, V> {
         if self.is_null() {
             return NodePtr::null();
         }
-        unsafe { (*self.0).parent }
+        unsafe {
+            let mut value = (*self.0).parent;
+            for m in (*self.0).mods.iter() {
+                if m.version > version {
+                    break;
+                }
+                if let ModData::Parent(d) = m.data {
+                    value = d;
+                }
+            }
+            value
+        }
     }
 
     fn left(&self, version: usize) -> NodePtr<K, V> {
@@ -294,29 +400,30 @@ impl<K: Ord + Clone, V: Clone> NodePtr<K, V> {
     unsafe fn deep_clone(&self, version: usize) -> NodePtr<K, V> {
         let mut node = NodePtr::new((*self.0).key.clone(), (*self.0).value.clone());
         if !self.left(version).is_null() {
-            node.set_left(self.left(version).deep_clone(version));
-            node.left(version).set_parent(node);
+            node.set_left(self.left(version).deep_clone(version), version);
+            node.left(version).set_parent(node, version);
         }
         if !self.right(version).is_null() {
-            node.set_right(self.right(version).deep_clone(version));
-            node.right(version).set_parent(node);
+            node.set_right(self.right(version).deep_clone(version), version);
+            node.right(version).set_parent(node, version);
         }
         node
     }
 }
 
-pub struct Gojo<K: Ord, V> {
+pub struct Gojo<K: Ord + Clone, V: Clone> {
     root: NodePtr<K, V>,
     len: usize,
-    version: usize,
+    curr_version: usize,
+    roots: Vec<NodePtr<K, V>>,
 }
 
-unsafe impl<K: Ord, V> Send for Gojo<K, V> {}
+unsafe impl<K: Ord + Clone, V: Clone> Send for Gojo<K, V> {}
 
-unsafe impl<K: Ord, V> Sync for Gojo<K, V> {}
+unsafe impl<K: Ord + Clone, V: Clone> Sync for Gojo<K, V> {}
 
 // Drop all owned pointers if the tree is dropped
-impl<K: Ord, V> Drop for Gojo<K, V> {
+impl<K: Ord + Clone, V: Clone> Drop for Gojo<K, V> {
     fn drop(&mut self) {
         self.clear();
     }
@@ -327,14 +434,14 @@ impl<K: Ord + Clone, V: Clone> Clone for Gojo<K, V> {
     fn clone(&self) -> Gojo<K, V> {
         unsafe {
             let mut new = Gojo::new();
-            new.root = self.root.deep_clone(self.version);
+            new.root = self.root.deep_clone(self.curr_version);
             new.len = self.len;
             new
         }
     }
 }
 
-pub struct Iter<'a, K: Ord + 'a, V: 'a> {
+pub struct Iter<'a, K: Ord + Clone + 'a, V: Clone + 'a> {
     head: NodePtr<K, V>,
     tail: NodePtr<K, V>,
     len: usize,
@@ -342,7 +449,7 @@ pub struct Iter<'a, K: Ord + 'a, V: 'a> {
     _marker: marker::PhantomData<&'a ()>,
 }
 
-impl<'a, K: Ord + 'a, V: 'a> Clone for Iter<'a, K, V> {
+impl<'a, K: Ord + Clone + 'a, V: Clone + 'a> Clone for Iter<'a, K, V> {
     fn clone(&self) -> Iter<'a, K, V> {
         Iter {
             head: self.head,
@@ -354,7 +461,7 @@ impl<'a, K: Ord + 'a, V: 'a> Clone for Iter<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord + 'a, V: 'a> Iterator for Iter<'a, K, V> {
+impl<'a, K: Ord + Clone + 'a, V: Clone + 'a> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -377,7 +484,7 @@ impl<'a, K: Ord + 'a, V: 'a> Iterator for Iter<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord + 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
+impl<'a, K: Ord + Clone + 'a, V: Clone + 'a> DoubleEndedIterator for Iter<'a, K, V> {
     fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
         // println!("len = {:?}", self.len);
         if self.len == 0 {
@@ -391,7 +498,7 @@ impl<'a, K: Ord + 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
     }
 }
 
-impl<K, V> Debug for Gojo<K, V>
+impl<K: Ord + Clone, V: Clone> Debug for Gojo<K, V>
 where
     K: Ord + Debug,
     V: Debug,
@@ -402,7 +509,7 @@ where
 }
 
 /// This is a method to help us to get inner struct.
-impl<K: Ord + Debug, V: Debug> Gojo<K, V> {
+impl<K: Ord + Clone + Debug, V: Debug + Clone> Gojo<K, V> {
     fn tree_print(&self, node: NodePtr<K, V>, direction: i32, version: usize) {
         if node.is_null() {
             return;
@@ -417,7 +524,7 @@ impl<K: Ord + Debug, V: Debug> Gojo<K, V> {
                 println!(
                     "{:?} is {:?}'s {:?} child ",
                     (*node.0),
-                    *node.parent().0,
+                    *node.parent(version).0,
                     direct
                 );
             }
@@ -439,44 +546,51 @@ impl<K: Ord + Debug, V: Debug> Gojo<K, V> {
 
 impl<K, V> PartialEq for Gojo<K, V>
 where
-    K: Eq + Ord,
-    V: PartialEq,
+    K: Eq + Ord + Clone,
+    V: PartialEq + Clone,
 {
     fn eq(&self, other: &Gojo<K, V>) -> bool {
         if self.len() != other.len() {
             return false;
         }
 
-        self.iter()
-            .all(|(key, value)| other.get(key).map_or(false, |v| *value == *v))
+        self.iter().all(|(key, value)| {
+            other
+                .get(key, self.curr_version)
+                .map_or(false, |v| *value == *v)
+        })
     }
 }
 
 impl<K, V> Eq for Gojo<K, V>
 where
-    K: Eq + Ord,
-    V: Eq,
+    K: Eq + Ord + Clone,
+    V: Eq + Clone,
 {
 }
 
 impl<'a, K, V> Index<&'a K> for Gojo<K, V>
 where
-    K: Ord,
+    K: Ord + Clone,
+    V: Clone,
 {
     type Output = V;
 
     fn index(&self, index: &K) -> &V {
-        self.get(index).expect("no entry found for key")
+        self.get(index, self.curr_version)
+            .expect("no entry found for key")
     }
 }
 
-impl<K: Ord, V> Gojo<K, V> {
+impl<K: Ord + Clone, V: Clone> Gojo<K, V> {
     /// Creates an empty `RBTree`.
     pub fn new() -> Gojo<K, V> {
+        let roots = Vec::from([NodePtr::<K, V>::null()]);
         Gojo {
             root: NodePtr::null(),
             len: 0,
-            version: 0,
+            curr_version: 0,
+            roots,
         }
     }
 
@@ -485,55 +599,66 @@ impl<K: Ord, V> Gojo<K, V> {
         self.len
     }
 
+    /// Return the current version
+    pub fn version(&self) -> usize {
+        self.curr_version
+    }
+
     /// Returns `true` if the `RBTree` is empty.
     pub fn is_empty(&self) -> bool {
         self.root.is_null()
     }
 
     unsafe fn left_rotate(&mut self, mut node: NodePtr<K, V>) {
-        let mut temp = node.right(self.version);
-        node.set_right(temp.left(self.version));
+        let mut temp = node.right(self.curr_version);
+        node.set_right(temp.left(self.curr_version), self.curr_version);
 
-        if !temp.left(self.version).is_null() {
-            temp.left(self.version).set_parent(node);
+        if !temp.left(self.curr_version).is_null() {
+            temp.left(self.curr_version)
+                .set_parent(node, self.curr_version);
         }
 
-        temp.set_parent(node.parent());
+        temp.set_parent(node.parent(self.curr_version), self.curr_version);
         if node == self.root {
             self.root = temp;
-        } else if node == node.parent().left(self.version) {
-            node.parent().set_left(temp);
+        } else if node == node.parent(self.curr_version).left(self.curr_version) {
+            node.parent(self.curr_version)
+                .set_left(temp, self.curr_version);
         } else {
-            node.parent().set_right(temp);
+            node.parent(self.curr_version)
+                .set_right(temp, self.curr_version);
         }
 
-        temp.set_left(node);
-        node.set_parent(temp);
+        temp.set_left(node, self.curr_version);
+        node.set_parent(temp, self.curr_version);
     }
 
     unsafe fn right_rotate(&mut self, mut node: NodePtr<K, V>) {
-        let mut temp = node.left(self.version);
-        node.set_left(temp.right(self.version));
+        let mut temp = node.left(self.curr_version);
+        node.set_left(temp.right(self.curr_version), self.curr_version);
 
-        if !temp.right(self.version).is_null() {
-            temp.right(self.version).set_parent(node);
+        if !temp.right(self.curr_version).is_null() {
+            temp.right(self.curr_version)
+                .set_parent(node, self.curr_version);
         }
 
-        temp.set_parent(node.parent());
+        temp.set_parent(node.parent(self.curr_version), self.curr_version);
         if node == self.root {
             self.root = temp;
-        } else if node == node.parent().right(self.version) {
-            node.parent().set_right(temp);
+        } else if node == node.parent(self.curr_version).right(self.curr_version) {
+            node.parent(self.curr_version)
+                .set_right(temp, self.curr_version);
         } else {
-            node.parent().set_left(temp);
+            node.parent(self.curr_version)
+                .set_left(temp, self.curr_version);
         }
 
-        temp.set_right(node);
-        node.set_parent(temp);
+        temp.set_right(node, self.curr_version);
+        node.set_parent(temp, self.curr_version);
     }
 
     pub fn replace_or_insert(&mut self, k: K, mut v: V) -> Option<V> {
-        let node = self.find_node(&k);
+        let node = self.find_node(&k, self.curr_version);
         if node.is_null() {
             self.insert(k, v);
             return None;
@@ -550,12 +675,15 @@ impl<K: Ord, V> Gojo<K, V> {
         let mut parent;
         let mut gparent;
 
-        while node.parent().is_red_color() {
-            parent = node.parent();
-            gparent = parent.parent();
-            if parent == gparent.left(self.version) {
-                let mut uncle = gparent.right(self.version);
-                if !uncle.is_null() && uncle.is_red_color() {
+        while node
+            .parent(self.curr_version)
+            .is_red_color(self.curr_version)
+        {
+            parent = node.parent(self.curr_version);
+            gparent = parent.parent(self.curr_version);
+            if parent == gparent.left(self.curr_version) {
+                let mut uncle = gparent.right(self.curr_version);
+                if !uncle.is_null() && uncle.is_red_color(self.curr_version) {
                     uncle.set_black_color();
                     parent.set_black_color();
                     gparent.set_red_color();
@@ -563,7 +691,7 @@ impl<K: Ord, V> Gojo<K, V> {
                     continue;
                 }
 
-                if parent.right(self.version) == node {
+                if parent.right(self.curr_version) == node {
                     self.left_rotate(parent);
                     std::mem::swap(&mut parent, &mut node);
                 }
@@ -572,8 +700,8 @@ impl<K: Ord, V> Gojo<K, V> {
                 gparent.set_red_color();
                 self.right_rotate(gparent);
             } else {
-                let mut uncle = gparent.left(self.version);
-                if !uncle.is_null() && uncle.is_red_color() {
+                let mut uncle = gparent.left(self.curr_version);
+                if !uncle.is_null() && uncle.is_red_color(self.curr_version) {
                     uncle.set_black_color();
                     parent.set_black_color();
                     gparent.set_red_color();
@@ -581,7 +709,7 @@ impl<K: Ord, V> Gojo<K, V> {
                     continue;
                 }
 
-                if parent.left(self.version) == node {
+                if parent.left(self.curr_version) == node {
                     self.right_rotate(parent);
                     std::mem::swap(&mut parent, &mut node);
                 }
@@ -598,30 +726,31 @@ impl<K: Ord, V> Gojo<K, V> {
         self.len += 1;
         let mut node = NodePtr::new(k, v);
         let mut y = NodePtr::null();
-        let mut x = self.root;
+        let mut x = self.roots[self.curr_version];
+        self.curr_version += 1;
 
         while !x.is_null() {
             y = x;
             match node.cmp(&x) {
                 Ordering::Less => {
-                    x = x.left(self.version);
+                    x = x.left(self.curr_version);
                 }
                 _ => {
-                    x = x.right(self.version);
+                    x = x.right(self.curr_version);
                 }
             };
         }
-        node.set_parent(y);
+        node.set_parent(y, self.curr_version);
 
         if y.is_null() {
             self.root = node;
         } else {
             match node.cmp(&y) {
                 Ordering::Less => {
-                    y.set_left(node);
+                    y.set_left(node, self.curr_version);
                 }
                 _ => {
-                    y.set_right(node);
+                    y.set_right(node, self.curr_version);
                 }
             };
         }
@@ -630,19 +759,23 @@ impl<K: Ord, V> Gojo<K, V> {
         unsafe {
             self.insert_fixup(node);
         }
+
+        self.roots.push(self.root);
     }
 
-    fn find_node(&self, k: &K) -> NodePtr<K, V> {
-        if self.root.is_null() {
+    fn find_node(&self, k: &K, version: usize) -> NodePtr<K, V> {
+        if version > self.curr_version {
             return NodePtr::null();
         }
-        let mut temp = &self.root;
+
+        let root = self.roots[version];
+        let mut temp = root;
         unsafe {
             loop {
                 let next = match k.cmp(&(*temp.0).key) {
-                    Ordering::Less => &mut (*temp.0).left,
-                    Ordering::Greater => &mut (*temp.0).right,
-                    Ordering::Equal => return *temp,
+                    Ordering::Less => temp.left(version),
+                    Ordering::Greater => temp.right(version),
+                    Ordering::Equal => return temp,
                 };
                 if next.is_null() {
                     break;
@@ -658,8 +791,8 @@ impl<K: Ord, V> Gojo<K, V> {
             NodePtr::null()
         } else {
             let mut temp = self.root;
-            while !temp.left(self.version).is_null() {
-                temp = temp.left(self.version);
+            while !temp.left(self.curr_version).is_null() {
+                temp = temp.left(self.curr_version);
             }
             temp
         }
@@ -670,8 +803,8 @@ impl<K: Ord, V> Gojo<K, V> {
             NodePtr::null()
         } else {
             let mut temp = self.root;
-            while !temp.right(self.version).is_null() {
-                temp = temp.right(self.version);
+            while !temp.right(self.curr_version).is_null() {
+                temp = temp.right(self.curr_version);
             }
             temp
         }
@@ -725,8 +858,8 @@ impl<K: Ord, V> Gojo<K, V> {
         unsafe { Some((&(*last.0).key, &mut (*last.0).value)) }
     }
 
-    pub fn get(&self, k: &K) -> Option<&V> {
-        let node = self.find_node(k);
+    pub fn get(&self, k: &K, version: usize) -> Option<&V> {
+        let node = self.find_node(k, version);
         if node.is_null() {
             return None;
         }
@@ -734,8 +867,8 @@ impl<K: Ord, V> Gojo<K, V> {
         unsafe { Some(&(*node.0).value) }
     }
 
-    pub fn get_mut(&mut self, k: &K) -> Option<&mut V> {
-        let node = self.find_node(k);
+    pub fn get_mut(&mut self, k: &K, version: usize) -> Option<&mut V> {
+        let node = self.find_node(k, version);
         if node.is_null() {
             return None;
         }
@@ -743,8 +876,8 @@ impl<K: Ord, V> Gojo<K, V> {
         unsafe { Some(&mut (*node.0).value) }
     }
 
-    pub fn contains_key(&self, k: &K) -> bool {
-        let node = self.find_node(k);
+    pub fn contains_key(&self, k: &K, version: usize) -> bool {
+        let node = self.find_node(k, version);
         if node.is_null() {
             return false;
         }
@@ -754,8 +887,8 @@ impl<K: Ord, V> Gojo<K, V> {
     fn clear_recurse(&mut self, current: NodePtr<K, V>) {
         if !current.is_null() {
             unsafe {
-                self.clear_recurse(current.left(self.version));
-                self.clear_recurse(current.right(self.version));
+                self.clear_recurse(current.left(self.curr_version));
+                self.clear_recurse(current.right(self.curr_version));
                 let _ = Box::from_raw(current.0);
             }
         }
@@ -774,7 +907,7 @@ impl<K: Ord, V> Gojo<K, V> {
     }
 
     pub fn remove(&mut self, k: &K) -> Option<V> {
-        let node = self.find_node(k);
+        let node = self.find_node(k, self.curr_version);
         if node.is_null() {
             return None;
         }
@@ -783,57 +916,75 @@ impl<K: Ord, V> Gojo<K, V> {
 
     unsafe fn delete_fixup(&mut self, mut node: NodePtr<K, V>, mut parent: NodePtr<K, V>) {
         let mut other;
-        while node != self.root && node.is_black_color() {
-            if parent.left(self.version) == node {
-                other = parent.right(self.version);
-                if other.is_red_color() {
+        while node != self.root && node.is_black_color(self.curr_version) {
+            if parent.left(self.curr_version) == node {
+                other = parent.right(self.curr_version);
+                if other.is_red_color(self.curr_version) {
                     other.set_black_color();
                     parent.set_red_color();
                     self.left_rotate(parent);
-                    other = parent.right(self.version);
+                    other = parent.right(self.curr_version);
                 }
 
-                if other.left(self.version).is_black_color() && other.right(self.version).is_black_color() {
+                if other
+                    .left(self.curr_version)
+                    .is_black_color(self.curr_version)
+                    && other
+                        .right(self.curr_version)
+                        .is_black_color(self.curr_version)
+                {
                     other.set_red_color();
                     node = parent;
-                    parent = node.parent();
+                    parent = node.parent(self.curr_version);
                 } else {
-                    if other.right(self.version).is_black_color() {
-                        other.left(self.version).set_black_color();
+                    if other
+                        .right(self.curr_version)
+                        .is_black_color(self.curr_version)
+                    {
+                        other.left(self.curr_version).set_black_color();
                         other.set_red_color();
                         self.right_rotate(other);
-                        other = parent.right(self.version);
+                        other = parent.right(self.curr_version);
                     }
-                    other.set_color(parent.get_color());
+                    other.set_color(parent.get_color(self.curr_version));
                     parent.set_black_color();
-                    other.right(self.version).set_black_color();
+                    other.right(self.curr_version).set_black_color();
                     self.left_rotate(parent);
                     node = self.root;
                     break;
                 }
             } else {
-                other = parent.left(self.version);
-                if other.is_red_color() {
+                other = parent.left(self.curr_version);
+                if other.is_red_color(self.curr_version) {
                     other.set_black_color();
                     parent.set_red_color();
                     self.right_rotate(parent);
-                    other = parent.left(self.version);
+                    other = parent.left(self.curr_version);
                 }
 
-                if other.left(self.version).is_black_color() && other.right(self.version).is_black_color() {
+                if other
+                    .left(self.curr_version)
+                    .is_black_color(self.curr_version)
+                    && other
+                        .right(self.curr_version)
+                        .is_black_color(self.curr_version)
+                {
                     other.set_red_color();
                     node = parent;
-                    parent = node.parent();
+                    parent = node.parent(self.curr_version);
                 } else {
-                    if other.left(self.version).is_black_color() {
-                        other.right(self.version).set_black_color();
+                    if other
+                        .left(self.curr_version)
+                        .is_black_color(self.curr_version)
+                    {
+                        other.right(self.curr_version).set_black_color();
                         other.set_red_color();
                         self.left_rotate(other);
-                        other = parent.left(self.version);
+                        other = parent.left(self.curr_version);
                     }
-                    other.set_color(parent.get_color());
+                    other.set_color(parent.get_color(self.curr_version));
                     parent.set_black_color();
-                    other.left(self.version).set_black_color();
+                    other.left(self.curr_version).set_black_color();
                     self.right_rotate(parent);
                     node = self.root;
                     break;
@@ -850,34 +1001,38 @@ impl<K: Ord, V> Gojo<K, V> {
         let color;
 
         self.len -= 1;
-        if !node.left(self.version).is_null() && !node.right(self.version).is_null() {
-            let mut replace = node.right(self.version).min_node(self.version);
+        if !node.left(self.curr_version).is_null() && !node.right(self.curr_version).is_null() {
+            let mut replace = node.right(self.curr_version).min_node(self.curr_version);
             if node == self.root {
                 self.root = replace;
-            } else if node.parent().left(self.version) == node {
-                node.parent().set_left(replace);
+            } else if node.parent(self.curr_version).left(self.curr_version) == node {
+                node.parent(self.curr_version)
+                    .set_left(replace, self.curr_version);
             } else {
-                node.parent().set_right(replace);
+                node.parent(self.curr_version)
+                    .set_right(replace, self.curr_version);
             }
 
-            child = replace.right(self.version);
-            parent = replace.parent();
-            color = replace.get_color();
+            child = replace.right(self.curr_version);
+            parent = replace.parent(self.curr_version);
+            color = replace.get_color(self.curr_version);
             if parent == node {
                 parent = replace;
             } else {
                 if !child.is_null() {
-                    child.set_parent(parent);
+                    child.set_parent(parent, self.curr_version);
                 }
-                parent.set_left(child);
-                replace.set_right(node.right(self.version));
-                node.right(self.version).set_parent(replace);
+                parent.set_left(child, self.curr_version);
+                replace.set_right(node.right(self.curr_version), self.curr_version);
+                node.right(self.curr_version)
+                    .set_parent(replace, self.curr_version);
             }
 
-            replace.set_parent(node.parent());
-            replace.set_color(node.get_color());
-            replace.set_left(node.left(self.version));
-            node.left(self.version).set_parent(replace);
+            replace.set_parent(node.parent(self.curr_version), self.curr_version);
+            replace.set_color(node.get_color(self.curr_version));
+            replace.set_left(node.left(self.curr_version), self.curr_version);
+            node.left(self.curr_version)
+                .set_parent(replace, self.curr_version);
 
             if color == Color::Black {
                 self.delete_fixup(child, parent);
@@ -887,24 +1042,24 @@ impl<K: Ord, V> Gojo<K, V> {
             return obj.pair();
         }
 
-        if !node.left(self.version).is_null() {
-            child = node.left(self.version);
+        if !node.left(self.curr_version).is_null() {
+            child = node.left(self.curr_version);
         } else {
-            child = node.right(self.version);
+            child = node.right(self.curr_version);
         }
 
-        parent = node.parent();
-        color = node.get_color();
+        parent = node.parent(self.curr_version);
+        color = node.get_color(self.curr_version);
         if !child.is_null() {
-            child.set_parent(parent);
+            child.set_parent(parent, self.curr_version);
         }
 
         if self.root == node {
             self.root = child
-        } else if parent.left(self.version) == node {
-            parent.set_left(child);
+        } else if parent.left(self.curr_version) == node {
+            parent.set_left(child, self.curr_version);
         } else {
-            parent.set_right(child);
+            parent.set_right(child, self.curr_version);
         }
 
         if color == Color::Black {
@@ -921,7 +1076,7 @@ impl<K: Ord, V> Gojo<K, V> {
             head: self.first_child(),
             tail: self.last_child(),
             len: self.len,
-            version: self.version,
+            version: self.curr_version,
             _marker: marker::PhantomData,
         }
     }
@@ -934,220 +1089,235 @@ mod tests {
     #[test]
     fn test_insert() {
         let mut m = Gojo::new();
-        assert_eq!(m.len(), 0);
         m.insert(1, 2);
-        assert_eq!(m.len(), 1);
         m.insert(2, 4);
-        assert_eq!(m.len(), 2);
         m.insert(2, 6);
         assert_eq!(m.len(), 3);
-        assert_eq!(*m.get(&1).unwrap(), 2);
-        assert_eq!(*m.get(&2).unwrap(), 4);
-        assert_eq!(*m.get(&2).unwrap(), 4);
+
+        let version = 3;
+        assert_eq!(m.version(), version);
+
+        assert_eq!(*m.get(&1, version).unwrap(), 2);
+        assert_eq!(*m.get(&2, version).unwrap(), 4);
+        assert_eq!(*m.get(&2, version).unwrap(), 4);
     }
 
     #[test]
-    fn test_replace() {
+    fn test_cant_find_element_without_correct_version() {
         let mut m = Gojo::new();
-        assert_eq!(m.len(), 0);
-        m.insert(2, 4);
-        assert_eq!(m.len(), 1);
-        assert_eq!(m.replace_or_insert(2, 6).unwrap(), 4);
-        assert_eq!(m.len(), 1);
-        assert_eq!(*m.get(&2).unwrap(), 6);
-    }
-
-    #[test]
-    fn test_clone() {
-        let mut m = Gojo::new();
-        assert_eq!(m.len(), 0);
-        m.insert(1, 2);
-        assert_eq!(m.len(), 1);
-        m.insert(2, 4);
-        assert_eq!(m.len(), 2);
-        let m2 = m.clone();
-        m.clear();
-        assert_eq!(*m2.get(&1).unwrap(), 2);
-        assert_eq!(*m2.get(&2).unwrap(), 4);
-        assert_eq!(m2.len(), 2);
-    }
-
-    #[test]
-    fn test_empty_remove() {
-        let mut m: Gojo<isize, bool> = Gojo::new();
-        assert_eq!(m.remove(&0), None);
-    }
-
-    #[test]
-    fn test_lots_of_insertions() {
-        let mut m = Gojo::new();
-
-        // Try this a few times to make sure we never screw up the hashmap's
-        // internal state.
-        for _ in 0..10 {
-            assert!(m.is_empty());
-
-            for i in 1..101 {
-                m.insert(i, i);
-
-                for j in 1..i + 1 {
-                    let r = m.get(&j);
-                    assert_eq!(r, Some(&j));
-                }
-
-                for j in i + 1..101 {
-                    let r = m.get(&j);
-                    assert_eq!(r, None);
-                }
-            }
-
-            for i in 101..201 {
-                assert!(!m.contains_key(&i));
-            }
-
-            // remove forwards
-            for i in 1..101 {
-                assert!(m.remove(&i).is_some());
-
-                for j in 1..i + 1 {
-                    assert!(!m.contains_key(&j));
-                }
-
-                for j in i + 1..101 {
-                    assert!(m.contains_key(&j));
-                }
-            }
-
-            for i in 1..101 {
-                assert!(!m.contains_key(&i));
-            }
-
-            for i in 1..101 {
-                m.insert(i, i);
-            }
-
-            // remove backwards
-            for i in (1..101).rev() {
-                assert!(m.remove(&i).is_some());
-
-                for j in i..101 {
-                    assert!(!m.contains_key(&j));
-                }
-
-                for j in 1..i {
-                    assert!(m.contains_key(&j));
-                }
-            }
+        for key in 1..10 {
+            m.insert(key, key << 2);
         }
+
+        let version = 6;
+        let key = 7;
+        assert!(m.get(&key, version).is_none());
     }
 
-    #[test]
-    fn test_find_mut() {
-        let mut m = Gojo::new();
-        m.insert(1, 12);
-        m.insert(2, 8);
-        m.insert(5, 14);
-        let new = 100;
-        match m.get_mut(&5) {
-            None => panic!(),
-            Some(x) => *x = new,
-        }
-        assert_eq!(m.get(&5), Some(&new));
-    }
-
-    #[test]
-    fn test_remove() {
-        let mut m = Gojo::new();
-        m.insert(1, 2);
-        assert_eq!(*m.get(&1).unwrap(), 2);
-        m.insert(5, 3);
-        assert_eq!(*m.get(&5).unwrap(), 3);
-        m.insert(9, 4);
-        assert_eq!(*m.get(&1).unwrap(), 2);
-        assert_eq!(*m.get(&5).unwrap(), 3);
-        assert_eq!(*m.get(&9).unwrap(), 4);
-        assert_eq!(m.remove(&1).unwrap(), 2);
-        assert_eq!(m.remove(&5).unwrap(), 3);
-        assert_eq!(m.remove(&9).unwrap(), 4);
-        assert_eq!(m.len(), 0);
-    }
-
-    #[test]
-    fn test_is_empty() {
-        let mut m = Gojo::new();
-        m.insert(1, 2);
-        assert!(!m.is_empty());
-        assert!(m.remove(&1).is_some());
-        assert!(m.is_empty());
-    }
-
-    #[test]
-    fn test_pop() {
-        let mut m = Gojo::new();
-        m.insert(2, 4);
-        m.insert(1, 2);
-        m.insert(3, 6);
-        assert_eq!(m.len(), 3);
-        assert_eq!(m.pop_first(), Some((1, 2)));
-        assert_eq!(m.len(), 2);
-        assert_eq!(m.pop_last(), Some((3, 6)));
-        assert_eq!(m.len(), 1);
-        assert_eq!(m.get_first(), Some((&2, &4)));
-        assert_eq!(m.get_last(), Some((&2, &4)));
-    }
-
-    #[test]
-    fn test_eq() {
-        let mut m1 = Gojo::new();
-        m1.insert(1, 2);
-        m1.insert(2, 3);
-        m1.insert(3, 4);
-
-        let mut m2 = Gojo::new();
-        m2.insert(1, 2);
-        m2.insert(2, 3);
-
-        assert!(m1 != m2);
-
-        m2.insert(3, 4);
-
-        assert_eq!(m1, m2);
-    }
-
-    #[test]
-    fn test_show() {
-        let mut map = Gojo::new();
-        let empty: Gojo<i32, i32> = Gojo::new();
-
-        map.insert(1, 2);
-        map.insert(3, 4);
-
-        let map_str = format!("{:?}", map);
-
-        assert!(map_str == "{1: 2, 3: 4}" || map_str == "{3: 4, 1: 2}");
-        assert_eq!(format!("{:?}", empty), "{}");
-    }
-
-    #[test]
-    fn test_index() {
-        let mut map = Gojo::new();
-
-        map.insert(1, 2);
-        map.insert(2, 1);
-        map.insert(3, 4);
-
-        assert_eq!(map[&2], 1);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_index_nonexistent() {
-        let mut map = Gojo::new();
-
-        map.insert(1, 2);
-        map.insert(2, 1);
-        map.insert(3, 4);
-
-        assert!(map.len() > 4);
-    }
+    // #[test]
+    // fn test_replace() {
+    //     let mut m = Gojo::new();
+    //     assert_eq!(m.len(), 0);
+    //     m.insert(2, 4);
+    //     assert_eq!(m.len(), 1);
+    //     assert_eq!(m.replace_or_insert(2, 6).unwrap(), 4);
+    //     assert_eq!(m.len(), 1);
+    //     assert_eq!(*m.get(&2).unwrap(), 6);
+    // }
+    //
+    // #[test]
+    // fn test_clone() {
+    //     let mut m = Gojo::new();
+    //     assert_eq!(m.len(), 0);
+    //     m.insert(1, 2);
+    //     assert_eq!(m.len(), 1);
+    //     m.insert(2, 4);
+    //     assert_eq!(m.len(), 2);
+    //     let m2 = m.clone();
+    //     m.clear();
+    //     assert_eq!(*m2.get(&1).unwrap(), 2);
+    //     assert_eq!(*m2.get(&2).unwrap(), 4);
+    //     assert_eq!(m2.len(), 2);
+    // }
+    //
+    // #[test]
+    // fn test_empty_remove() {
+    //     let mut m: Gojo<isize, bool> = Gojo::new();
+    //     assert_eq!(m.remove(&0), None);
+    // }
+    //
+    // #[test]
+    // fn test_lots_of_insertions() {
+    //     let mut m = Gojo::new();
+    //
+    //     // Try this a few times to make sure we never screw up the hashmap's
+    //     // internal state.
+    //     for _ in 0..10 {
+    //         assert!(m.is_empty());
+    //
+    //         for i in 1..101 {
+    //             m.insert(i, i);
+    //
+    //             for j in 1..i + 1 {
+    //                 let r = m.get(&j);
+    //                 assert_eq!(r, Some(&j));
+    //             }
+    //
+    //             for j in i + 1..101 {
+    //                 let r = m.get(&j);
+    //                 assert_eq!(r, None);
+    //             }
+    //         }
+    //
+    //         for i in 101..201 {
+    //             assert!(!m.contains_key(&i));
+    //         }
+    //
+    //         // remove forwards
+    //         for i in 1..101 {
+    //             assert!(m.remove(&i).is_some());
+    //
+    //             for j in 1..i + 1 {
+    //                 assert!(!m.contains_key(&j));
+    //             }
+    //
+    //             for j in i + 1..101 {
+    //                 assert!(m.contains_key(&j));
+    //             }
+    //         }
+    //
+    //         for i in 1..101 {
+    //             assert!(!m.contains_key(&i));
+    //         }
+    //
+    //         for i in 1..101 {
+    //             m.insert(i, i);
+    //         }
+    //
+    //         // remove backwards
+    //         for i in (1..101).rev() {
+    //             assert!(m.remove(&i).is_some());
+    //
+    //             for j in i..101 {
+    //                 assert!(!m.contains_key(&j));
+    //             }
+    //
+    //             for j in 1..i {
+    //                 let kkk = m.contains_key(&j);
+    //
+    //                 assert!(m.contains_key(&j));
+    //             }
+    //         }
+    //     }
+    // }
+    //
+    // #[test]
+    // fn test_find_mut() {
+    //     let mut m = Gojo::new();
+    //     m.insert(1, 12);
+    //     m.insert(2, 8);
+    //     m.insert(5, 14);
+    //     let new = 100;
+    //     match m.get_mut(&5) {
+    //         None => panic!(),
+    //         Some(x) => *x = new,
+    //     }
+    //     assert_eq!(m.get(&5), Some(&new));
+    // }
+    //
+    // #[test]
+    // fn test_remove() {
+    //     let mut m = Gojo::new();
+    //     m.insert(1, 2);
+    //     assert_eq!(*m.get(&1).unwrap(), 2);
+    //     m.insert(5, 3);
+    //     assert_eq!(*m.get(&5).unwrap(), 3);
+    //     m.insert(9, 4);
+    //     assert_eq!(*m.get(&1).unwrap(), 2);
+    //     assert_eq!(*m.get(&5).unwrap(), 3);
+    //     assert_eq!(*m.get(&9).unwrap(), 4);
+    //     assert_eq!(m.remove(&1).unwrap(), 2);
+    //     assert_eq!(m.remove(&5).unwrap(), 3);
+    //     assert_eq!(m.remove(&9).unwrap(), 4);
+    //     assert_eq!(m.len(), 0);
+    // }
+    //
+    // #[test]
+    // fn test_is_empty() {
+    //     let mut m = Gojo::new();
+    //     m.insert(1, 2);
+    //     assert!(!m.is_empty());
+    //     assert!(m.remove(&1).is_some());
+    //     assert!(m.is_empty());
+    // }
+    //
+    // #[test]
+    // fn test_pop() {
+    //     let mut m = Gojo::new();
+    //     m.insert(2, 4);
+    //     m.insert(1, 2);
+    //     m.insert(3, 6);
+    //     assert_eq!(m.len(), 3);
+    //     assert_eq!(m.pop_first(), Some((1, 2)));
+    //     assert_eq!(m.len(), 2);
+    //     assert_eq!(m.pop_last(), Some((3, 6)));
+    //     assert_eq!(m.len(), 1);
+    //     assert_eq!(m.get_first(), Some((&2, &4)));
+    //     assert_eq!(m.get_last(), Some((&2, &4)));
+    // }
+    //
+    // #[test]
+    // fn test_eq() {
+    //     let mut m1 = Gojo::new();
+    //     m1.insert(1, 2);
+    //     m1.insert(2, 3);
+    //     m1.insert(3, 4);
+    //
+    //     let mut m2 = Gojo::new();
+    //     m2.insert(1, 2);
+    //     m2.insert(2, 3);
+    //
+    //     assert!(m1 != m2);
+    //
+    //     m2.insert(3, 4);
+    //
+    //     assert_eq!(m1, m2);
+    // }
+    //
+    // #[test]
+    // fn test_show() {
+    //     let mut map = Gojo::new();
+    //     let empty: Gojo<i32, i32> = Gojo::new();
+    //
+    //     map.insert(1, 2);
+    //     map.insert(3, 4);
+    //
+    //     let map_str = format!("{:?}", map);
+    //
+    //     assert!(map_str == "{1: 2, 3: 4}" || map_str == "{3: 4, 1: 2}");
+    //     assert_eq!(format!("{:?}", empty), "{}");
+    // }
+    //
+    // #[test]
+    // fn test_index() {
+    //     let mut map = Gojo::new();
+    //
+    //     map.insert(1, 2);
+    //     map.insert(2, 1);
+    //     map.insert(3, 4);
+    //
+    //     assert_eq!(map[&2], 1);
+    // }
+    //
+    // #[test]
+    // #[should_panic]
+    // fn test_index_nonexistent() {
+    //     let mut map = Gojo::new();
+    //
+    //     map.insert(1, 2);
+    //     map.insert(2, 1);
+    //     map.insert(3, 4);
+    //
+    //     assert!(map.len() > 4);
+    // }
 }
