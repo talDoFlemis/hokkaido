@@ -526,15 +526,15 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
         self.root.is_null()
     }
 
-    pub fn set_possible_new_root(&mut self, possible_new_root: Option<NodePtr<K, V>>) {
+    fn set_possible_new_root(&mut self, possible_new_root: Option<NodePtr<K, V>>) {
         if possible_new_root.is_some() {
             self.root = possible_new_root.unwrap();
         }
     }
 
-    unsafe fn left_rotate(&mut self, mut node: NodePtr<K, V>) -> Option<NodePtr<K, V>> {
-        let temp = node.right(self.curr_version);
-        let mut possible_new_root = node.set_right(temp.left(self.curr_version), self.curr_version);
+    unsafe fn left_rotate(&mut self, mut node: NodePtr<K, V>) {
+        let mut temp = node.right(self.curr_version);
+        self.set_possible_new_root(node.set_right(temp.left(self.curr_version), self.curr_version));
 
         if !temp.left(self.curr_version).is_null() {
             self.set_possible_new_root(
@@ -544,42 +544,53 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
         }
 
         if node.parent(self.curr_version).is_null() {
-            self.root = temp;
+            self.root = temp.clone();
         } else if node == temp.parent(self.curr_version).left(self.curr_version) {
-            node.parent(self.curr_version)
-                .set_left(temp, self.curr_version);
+            self.set_possible_new_root(
+                node.parent(self.curr_version)
+                    .set_left(temp, self.curr_version),
+            );
         } else {
-            node.parent(self.curr_version)
-                .set_right(temp, self.curr_version);
+            self.set_possible_new_root(
+                node.parent(self.curr_version)
+                    .set_right(temp, self.curr_version),
+            );
         }
 
-        node.set_parent(temp, self.curr_version);
-
-        possible_new_root
+        self.set_possible_new_root(temp.set_left(node, self.curr_version));
+        self.set_possible_new_root(node.set_parent(temp, self.curr_version));
     }
 
     unsafe fn right_rotate(&mut self, mut node: NodePtr<K, V>) {
         let mut temp = node.left(self.curr_version);
-        node.set_left(temp.right(self.curr_version), self.curr_version);
+        self.set_possible_new_root(node.set_left(temp.right(self.curr_version), self.curr_version));
 
         if !temp.right(self.curr_version).is_null() {
-            temp.right(self.curr_version)
-                .set_parent(node, self.curr_version);
+            self.set_possible_new_root(
+                temp.right(self.curr_version)
+                    .set_parent(node, self.curr_version),
+            );
         }
 
-        temp.set_parent(node.parent(self.curr_version), self.curr_version);
+        self.set_possible_new_root(
+            temp.set_parent(node.parent(self.curr_version), self.curr_version),
+        );
         if node == self.root {
             self.root = temp;
         } else if node == node.parent(self.curr_version).right(self.curr_version) {
-            node.parent(self.curr_version)
-                .set_right(temp, self.curr_version);
+            self.set_possible_new_root(
+                node.parent(self.curr_version)
+                    .set_right(temp, self.curr_version),
+            );
         } else {
-            node.parent(self.curr_version)
-                .set_left(temp, self.curr_version);
+            self.set_possible_new_root(
+                node.parent(self.curr_version)
+                    .set_left(temp, self.curr_version),
+            );
         }
 
-        temp.set_right(node, self.curr_version);
-        node.set_parent(temp, self.curr_version);
+        self.set_possible_new_root(temp.set_right(node, self.curr_version));
+        self.set_possible_new_root(node.set_parent(temp, self.curr_version));
     }
 
     pub fn replace_or_insert(&mut self, k: K, mut v: V) -> Option<V> {
@@ -612,9 +623,9 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
 
                 // Case 1
                 if uncle.is_red_color(self.curr_version) {
-                    parent.set_black_color(self.curr_version);
-                    uncle.set_black_color(self.curr_version);
-                    gparent.set_red_color(self.curr_version);
+                    self.set_possible_new_root(parent.set_black_color(self.curr_version));
+                    self.set_possible_new_root(uncle.set_black_color(self.curr_version));
+                    self.set_possible_new_root(gparent.set_red_color(self.curr_version));
                     node = gparent;
                     continue;
                 }
@@ -626,17 +637,17 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
                 }
 
                 // Case 3
-                parent.set_black_color(self.curr_version);
-                gparent.set_red_color(self.curr_version);
+                self.set_possible_new_root(parent.set_black_color(self.curr_version));
+                self.set_possible_new_root(gparent.set_red_color(self.curr_version));
                 self.right_rotate(gparent);
             } else {
                 let mut uncle = gparent.left(self.curr_version);
 
                 // Case 4
                 if uncle.is_red_color(self.curr_version) {
-                    uncle.set_black_color(self.curr_version);
-                    parent.set_black_color(self.curr_version);
-                    gparent.set_red_color(self.curr_version);
+                    self.set_possible_new_root(uncle.set_black_color(self.curr_version));
+                    self.set_possible_new_root(parent.set_black_color(self.curr_version));
+                    self.set_possible_new_root(gparent.set_red_color(self.curr_version));
                     node = gparent;
                     continue;
                 }
@@ -648,12 +659,13 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
                 }
 
                 // Case 6
-                parent.set_black_color(self.curr_version);
-                gparent.set_red_color(self.curr_version);
+                self.set_possible_new_root(parent.set_black_color(self.curr_version));
+                self.set_possible_new_root(gparent.set_red_color(self.curr_version));
                 self.left_rotate(gparent);
             }
         }
-        self.root.set_black_color(self.curr_version);
+        let possible_new_root = self.root.set_black_color(self.curr_version);
+        self.set_possible_new_root(possible_new_root);
     }
 
     pub fn insert(&mut self, k: K, v: V) {
@@ -689,10 +701,10 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
             }
             match node.cmp(&y) {
                 Ordering::Less => {
-                    y.set_left(node, self.curr_version);
+                    self.set_possible_new_root(y.set_left(node, self.curr_version));
                 }
                 _ => {
-                    y.set_right(node, self.curr_version);
+                    self.set_possible_new_root(y.set_right(node, self.curr_version));
                 }
             };
         }
@@ -1027,7 +1039,7 @@ mod tests {
     #[test]
     fn test_insert() {
         let mut m = Gojo::new();
-        let maximum = 7;
+        let maximum = 100;
         for key in 1..=maximum {
             m.insert(key, key << 2);
         }
