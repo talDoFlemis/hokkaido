@@ -1,2 +1,2 @@
 mod furamengo;
-mod gojo;
+pub mod gojo;

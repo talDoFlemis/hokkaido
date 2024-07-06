@@ -2,6 +2,7 @@ use std::cmp::Ord;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
 use std::ptr;
+use std::ptr::drop_in_place;
 
 const MAX_MODS: usize = 6;
 const MAX_OPS: usize = 20;
@@ -641,7 +642,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         todo!()
     }
 
-    unsafe fn left_rotate(&mut self, mut node: NodePtr<K, V>) {
+    unsafe fn left_rotate(&mut self, node: NodePtr<K, V>) {
         let mut caba = node;
         let version = self.curr_version;
         let mut temp = caba.right(version);
@@ -664,7 +665,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         caba.set_parent(temp, version);
     }
 
-    unsafe fn right_rotate(&mut self, mut node: NodePtr<K, V>) {
+    unsafe fn right_rotate(&mut self, node: NodePtr<K, V>) {
         let mut caba = node;
         let version = self.curr_version;
         let mut temp = caba.left(version);
@@ -852,7 +853,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         self.roots = Vec::new();
     }
 
-    fn fast_clear(&mut self) {
+    pub fn fast_clear(&mut self) {
         self.root = NodePtr::null();
         self.len = 0;
         self.roots = Vec::new();
@@ -867,10 +868,117 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         unsafe { Some(self.delete(node).1) }
     }
 
-    unsafe fn delete_fixup(&mut self, x: NodePtr<K, V>) {}
+    unsafe fn delete_fixup(&mut self, x: NodePtr<K, V>) {
+        let mut caba = x;
+        let version = self.curr_version;
+        while caba != self.root && caba.is_black_color(version) {
+            if caba.is_left_child(version) {
+                let mut w = x.parent(version).right(version);
+
+                // Case 1
+                if w.is_red_color(version) {
+                    w.set_black_color(version);
+                    caba.parent(version).set_red_color(version);
+                    self.left_rotate(caba.parent(version));
+                    w = caba.parent(version).right(version);
+                }
+
+                // Case 2
+                if w.left(version).is_black_color(version)
+                    && w.right(version).is_black_color(version)
+                {
+                    w.set_red_color(version);
+                    caba = caba.parent(version);
+                }
+                // Case 3
+                else if w.right(version).is_black_color(version) {
+                    w.left(version).set_black_color(version);
+                    w.set_black_color(version);
+                    self.right_rotate(w);
+                    w = caba.parent(version).right(version);
+                }
+
+                // Case 4
+                w.set_color(caba.parent(version).get_color(version), version);
+                caba.parent(version).set_black_color(version);
+                w.right(version).set_black_color(version);
+                self.left_rotate(caba.parent(version));
+                caba = self.root;
+            } else {
+                let mut w = x.parent(version).left(version);
+
+                // Case 5
+                if w.is_red_color(version) {
+                    w.set_black_color(version);
+                    caba.parent(version).set_red_color(version);
+                    self.right_rotate(caba.parent(version));
+                    w = caba.parent(version).left(version);
+                }
+
+                // Case 6
+                if w.right(version).is_black_color(version)
+                    && w.left(version).is_black_color(version)
+                {
+                    w.set_red_color(version);
+                    caba = caba.parent(version);
+                }
+                // Case 7
+                else if w.left(version).is_black_color(version) {
+                    w.right(version).set_black_color(version);
+                    w.set_black_color(version);
+                    self.left_rotate(w);
+                    w = caba.parent(version).left(version);
+                }
+
+                // Case 8
+                w.set_color(caba.parent(version).get_color(version), version);
+                caba.parent(version).set_black_color(version);
+                w.left(version).set_black_color(version);
+                self.right_rotate(caba.parent(version));
+                caba = self.root;
+            }
+        }
+
+        caba.set_black_color(version);
+    }
 
     unsafe fn delete(&mut self, z: NodePtr<K, V>) -> (K, V) {
-        todo!()
+        let version = self.curr_version;
+        let y = if z.left(version).is_null() || z.right(version).is_null() {
+            z
+        } else {
+            self.successor(z)
+        };
+
+        let mut x = if y.left(version).is_null() {
+            y.left(version)
+        } else {
+            y.right(version)
+        };
+
+        if y.parent(version).is_null() {
+            self.root = x;
+        } else if y.is_left_child(version) {
+            x = y.parent(version).left(version);
+        } else {
+            x = y.parent(version).right(version);
+        }
+
+        if y != z {
+            (*z.pointer).key = (*y.pointer).key.clone();
+            (*z.pointer).value = (*y.pointer).value.clone();
+        }
+
+        if y.is_black_color(version) {
+            self.delete_fixup(x);
+        }
+
+        let key = (*y.pointer).key.clone();
+        let value = (*y.pointer).value.clone();
+        if y.pointer.is_null() {
+            drop_in_place(y.pointer);
+        }
+        (key, value)
     }
 }
 
@@ -1277,7 +1385,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_remove_red_node() {
         // Arrange
         let mut m = Gojo::new();
@@ -1291,28 +1398,31 @@ mod tests {
 
         // Assert
         assert!(res.is_some());
+        assert_eq!(res.unwrap(), 10 << 2);
+        assert_eq!(m.len(), 9);
+        assert!(m.get(&10, 10).is_some());
+        assert!(m.get(&10, 11).is_none());
     }
 
-    #[test]
-    #[ignore]
-    fn test_remove() {
-        // Arrange
-        let mut m = Gojo::new();
-        let maximum = 100;
-
-        // Act
-        for key in 1..=maximum {
-            m.insert(key, key << 2);
-        }
-        let res = m.remove(&1);
-
-        // Assert
-        assert_eq!(res, Some(2));
-
-        for key in 1..=maximum {
-            assert!(!m.find_node(&key, maximum).is_null());
-        }
-
-        assert!(m.find_node(&1, maximum + 1).is_null());
-    }
+    // #[test]
+    // fn test_remove() {
+    //     // Arrange
+    //     let mut m = Gojo::new();
+    //     let maximum = 100;
+    //
+    //     // Act
+    //     for key in 1..=maximum {
+    //         m.insert(key, key << 2);
+    //     }
+    //     let res = m.remove(&1);
+    //
+    //     // Assert
+    //     assert_eq!(res, Some(2));
+    //
+    //     for key in 1..=maximum {
+    //         assert!(!m.find_node(&key, maximum).is_null());
+    //     }
+    //
+    //     assert!(m.find_node(&1, maximum + 1).is_null());
+    // }
 }
