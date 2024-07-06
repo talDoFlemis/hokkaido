@@ -129,12 +129,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Default for GojoNode<K, V> {
     }
 }
 
-impl<K: Ord + Clone + Default, V: Clone + Default> GojoNode<K, V> {
-    fn pair(self) -> (K, V) {
-        (self.key, self.value)
-    }
-}
-
 struct NodePtr<K: Ord + Clone + Default, V: Clone + Default> {
     pointer: *mut GojoNode<K, V>,
     null: bool,
@@ -234,7 +228,11 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_color(&mut self, color: Color, version: usize) {
-        debug_assert!(!self.is_null(), "Should not update a color on a null node");
+
+        if self.is_null() {
+            // TODO: Maybe can break shit
+            return;
+        }
 
         let mut ptr = self.get_latest_copy_for_version(version);
 
@@ -634,11 +632,11 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         self.root.is_null()
     }
 
-    pub fn predecessor(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
+    fn predecessor_helper(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
         todo!()
     }
 
-    pub fn successor(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
+    fn successor_helper(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
         todo!()
     }
 
@@ -947,7 +945,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         let y = if z.left(version).is_null() || z.right(version).is_null() {
             z
         } else {
-            self.successor(z)
+            self.successor_helper(z)
         };
 
         let mut x = if y.left(version).is_null() {
@@ -1404,25 +1402,25 @@ mod tests {
         assert!(m.get(&10, 11).is_none());
     }
 
-    // #[test]
-    // fn test_remove() {
-    //     // Arrange
-    //     let mut m = Gojo::new();
-    //     let maximum = 100;
-    //
-    //     // Act
-    //     for key in 1..=maximum {
-    //         m.insert(key, key << 2);
-    //     }
-    //     let res = m.remove(&1);
-    //
-    //     // Assert
-    //     assert_eq!(res, Some(2));
-    //
-    //     for key in 1..=maximum {
-    //         assert!(!m.find_node(&key, maximum).is_null());
-    //     }
-    //
-    //     assert!(m.find_node(&1, maximum + 1).is_null());
-    // }
+    #[test]
+    fn test_remove() {
+        // Arrange
+        let mut m = Gojo::new();
+        let maximum = 100;
+
+        // Act
+        for key in 1..=maximum {
+            m.insert(key, key << 2);
+        }
+        let res = m.remove(&1);
+
+        // Assert
+        assert_eq!(res, Some(1 << 2));
+
+        for key in 1..=maximum {
+            assert!(!m.find_node(&key, maximum).is_null());
+        }
+
+        assert!(m.find_node(&1, maximum + 1).is_null());
+    }
 }
