@@ -391,7 +391,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
             bk_ptr_left.set_parent(new_node_ptr, version);
         }
 
-        // Update left back pontairos
+        // Update right back pontairos
         let mut bk_ptr_right = (*new_node_ptr.pointer).bk_ptr_right;
         if !bk_ptr_right.is_null() {
             bk_ptr_right.set_parent(new_node_ptr, version);
@@ -507,7 +507,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn is_null(&self) -> bool {
-        self.null == true
+        self.null
     }
 }
 
@@ -1204,6 +1204,79 @@ mod tests {
 
         // Assert
         assert_eq!(expected_right_ptr, actual_right);
+    }
+
+    #[test]
+    fn test_get_parent_without_mods() {
+        // Arrange
+        let no_mods_node = GojoNode {
+            ..Default::default()
+        };
+        let ptr = NodePtr::<i32, i32>::from(no_mods_node);
+        let version = 1;
+
+        // Act
+        let actual_parent = ptr.parent(version);
+
+        // Assert
+        assert!(actual_parent.is_null());
+    }
+
+    #[test]
+    fn test_get_parent_with_five_mods() {
+        // Arrange
+        let parent = GojoNode {
+            ..Default::default()
+        };
+        let expected_parent = NodePtr::<i32, i32>::from(parent);
+        let five_mods_node = GojoNode {
+            mods: Vec::from([
+                Mod::new(ModData::Parent(NodePtr::null()), 2),
+                Mod::new(ModData::Parent(NodePtr::null()), 3),
+                Mod::new(ModData::Parent(NodePtr::null()), 4),
+                Mod::new(ModData::Parent(expected_parent), 5),
+            ]),
+            ..Default::default()
+        };
+        let ptr = NodePtr::<i32, i32>::from(five_mods_node);
+        let version = 5;
+
+        // Act
+        let actual_parent = ptr.parent(version);
+
+        // Assert
+        assert_eq!(expected_parent, actual_parent);
+    }
+
+    #[test]
+    fn test_get_parent_with_bursted_node() {
+        // Arrange
+        let parent_node = GojoNode {
+            version: 7,
+            ..Default::default()
+        };
+        let mut expected_parent_ptr = NodePtr::<i32, i32>::from(parent_node);
+        let bursted_node = GojoNode {
+            mods: Vec::from([
+                Mod::new(ModData::Parent(NodePtr::null()), 2),
+                Mod::new(ModData::Parent(NodePtr::null()), 3),
+                Mod::new(ModData::Parent(NodePtr::null()), 4),
+                Mod::new(ModData::Parent(NodePtr::null()), 4),
+                Mod::new(ModData::Parent(NodePtr::null()), 5),
+                Mod::new(ModData::Parent(NodePtr::null()), 6),
+            ]),
+            ..Default::default()
+        };
+        let mut bursted_node_ptr = NodePtr::<i32, i32>::from(bursted_node);
+        let version = 7;
+
+        // Act
+        expected_parent_ptr.set_left(bursted_node_ptr, version);
+        bursted_node_ptr.set_parent(expected_parent_ptr, version);
+        let actual_parent = bursted_node_ptr.parent(version);
+
+        // Assert
+        assert_eq!(expected_parent_ptr, actual_parent);
     }
 
     #[test]
