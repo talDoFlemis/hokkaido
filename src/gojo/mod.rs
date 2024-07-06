@@ -4,6 +4,8 @@ use std::fmt::{self, Debug};
 use std::ptr;
 use std::ptr::drop_in_place;
 
+pub mod parser;
+
 const MAX_MODS: usize = 6;
 const DEFAULT_MAX_OPS: usize = 100;
 
@@ -1005,7 +1007,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
 }
 
 #[cfg(test)]
-mod tests {
+mod tree_tests {
     use pretty_assertions::assert_eq;
 
     use crate::gojo::{Color, Mod, ModData, NodePtr};
