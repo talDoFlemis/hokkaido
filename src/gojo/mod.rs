@@ -228,7 +228,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_color(&mut self, color: Color, version: usize) {
-
         if self.is_null() {
             // TODO: Maybe can break shit
             return;
@@ -632,12 +631,61 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         self.root.is_null()
     }
 
-    fn predecessor_helper(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
-        todo!()
+    pub fn predecessor(&self, k: &K, version: usize) -> Option<&V> {
+        let node = self.find_node(k, version);
+        if node.is_null() {
+            return None;
+        }
+
+        let succ = self.predecessor_helper(node, version);
+        if succ.is_null() {
+            return None;
+        }
+
+        unsafe { Some(&(*succ.pointer).value) }
     }
 
-    fn successor_helper(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
-        todo!()
+    fn predecessor_helper(&self, node: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
+        let mut x = node;
+        if !x.left(version).is_null() {
+            return x.left(version).max_node(version);
+        }
+
+        let mut y = x.parent(version);
+        while !y.is_null() && x.is_left_child(version) {
+            x = y;
+            y = x.parent(version);
+        }
+        y
+    }
+
+    pub fn successor(&self, k: &K, version: usize) -> Option<&V> {
+        let node = self.find_node(k, version);
+        if node.is_null() {
+            return None;
+        }
+
+        let succ = self.successor_helper(node, version);
+        if succ.is_null() {
+            return None;
+        }
+
+        unsafe { Some(&(*succ.pointer).value) }
+    }
+
+
+    fn successor_helper(&self, node: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
+        let mut x = node;
+        if !node.right(version).is_null() {
+            return x.right(version).min_node(version);
+        }
+
+        let mut y = x.parent(version);
+        while !y.is_null() && x.is_right_child(version) {
+            x = y;
+            y = x.parent(version);
+        }
+        y
     }
 
     unsafe fn left_rotate(&mut self, node: NodePtr<K, V>) {
@@ -945,7 +993,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         let y = if z.left(version).is_null() || z.right(version).is_null() {
             z
         } else {
-            self.successor_helper(z)
+            self.successor_helper(z, version)
         };
 
         let mut x = if y.left(version).is_null() {
@@ -982,6 +1030,8 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::assert_eq;
+
     use crate::gojo::{Color, Mod, ModData, NodePtr};
 
     use super::{Gojo, GojoNode};
@@ -1422,5 +1472,179 @@ mod tests {
         }
 
         assert!(m.find_node(&1, maximum + 1).is_null());
+    }
+
+    #[test]
+    fn test_empty_remove() {
+        // Arrange
+        let mut m: Gojo<isize, bool> = Gojo::new();
+
+        // Act
+        let res = m.remove(&0);
+
+        // Assert
+        assert_eq!(None, res);
+    }
+
+    #[test]
+    fn test_is_empty() {
+        // Arrange
+        let mut m = Gojo::new();
+
+        // Act
+        m.insert(1, 2);
+
+        // Assert
+        assert!(!m.is_empty());
+        assert!(m.remove(&1).is_some());
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn test_successor_up_on_tree() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let expected_succ = &2;
+        let version = 3;
+
+        // Act
+        gojo.insert(1, 1);
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+
+        let succ = gojo.successor(&1, version);
+
+        // Assert
+        assert!(succ.is_some());
+        assert_eq!(expected_succ, succ.unwrap());
+    }
+
+    #[test]
+    fn test_successor_in_right_tree() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let expected_succ = &3;
+        let version = 3;
+
+        // Act
+        gojo.insert(1, 1);
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+
+        let succ = gojo.successor(&2, version);
+
+        // Assert
+        assert!(succ.is_some());
+        assert_eq!(expected_succ, succ.unwrap());
+    }
+
+    #[test]
+    fn test_no_successor() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let version = 3;
+
+        // Act
+        gojo.insert(1, 1);
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+
+        let succ = gojo.successor(&3, version);
+
+        // Assert
+        assert!(succ.is_none());
+    }
+
+    #[test]
+    fn test_successor_in_different_versions() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+
+        // Act
+        gojo.insert(1, 1);
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+
+        let version_two_succ = gojo.successor(&2, 2);
+        let version_tree_succ = gojo.successor(&2, 3);
+
+        // Assert
+        assert!(version_two_succ.is_none());
+        assert!(version_tree_succ.is_some());
+        assert_eq!(&3, version_tree_succ.unwrap());
+    }
+
+    #[test]
+    fn test_predecessor_left_tree() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let expected_pred = &1;
+        let version = 3;
+
+        // Act
+        gojo.insert(1, 1);
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+
+        let pred = gojo.predecessor(&2, version);
+
+        // Assert
+        assert!(pred.is_some());
+        assert_eq!(expected_pred, pred.unwrap());
+    }
+
+    #[test]
+    fn test_predecessor_up_on_tree() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let expected_pred = &2;
+        let version = 3;
+
+        // Act
+        gojo.insert(1, 1);
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+
+        let pred = gojo.predecessor(&3, version);
+
+        // Assert
+        assert!(pred.is_some());
+        assert_eq!(expected_pred, pred.unwrap());
+    }
+
+    #[test]
+    fn test_no_predecessor() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let version = 3;
+
+        // Act
+        gojo.insert(1, 1);
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+
+        let pred = gojo.predecessor(&1, version);
+
+        // Assert
+        assert!(pred.is_none());
+    }
+
+    #[test]
+    fn test_predecessor_in_different_versions() {
+        // Arrange
+        let mut gojo: Gojo<usize, i32> = Gojo::new();
+
+        // Act
+        gojo.insert(2, 2);
+        gojo.insert(3, 3);
+        gojo.insert(1, 1);
+
+        let version_two_succ = gojo.predecessor(&2, 2);
+        let version_tree_succ = gojo.predecessor(&2, 3);
+
+        // Assert
+        assert!(version_two_succ.is_none());
+        assert!(version_tree_succ.is_some());
+        assert_eq!(&1, version_tree_succ.unwrap());
     }
 }
