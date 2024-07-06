@@ -1135,6 +1135,78 @@ mod tests {
     }
 
     #[test]
+    fn test_get_right_without_mods() {
+        // Arrange
+        let no_mods_node = GojoNode {
+            ..Default::default()
+        };
+        let ptr = NodePtr::<i32, i32>::from(no_mods_node);
+        let version = 1;
+
+        // Act
+        let actual_right = ptr.right(version);
+
+        // Assert
+        assert!(actual_right.is_null());
+    }
+
+    #[test]
+    fn test_get_right_with_five_mods() {
+        // Arrange
+        let right = GojoNode {
+            ..Default::default()
+        };
+        let expected_right = NodePtr::<i32, i32>::from(right);
+        let five_mods_node = GojoNode {
+            mods: Vec::from([
+                Mod::new(ModData::Right(NodePtr::null()), 2),
+                Mod::new(ModData::Right(NodePtr::null()), 3),
+                Mod::new(ModData::Right(NodePtr::null()), 4),
+                Mod::new(ModData::Right(expected_right), 5),
+            ]),
+            ..Default::default()
+        };
+        let ptr = NodePtr::<i32, i32>::from(five_mods_node);
+        let version = 5;
+
+        // Act
+        let actual_right = ptr.right(version);
+
+        // Assert
+        assert_eq!(expected_right, actual_right);
+    }
+
+    #[test]
+    fn test_get_right_with_bursted_node() {
+        // Arrange
+        let right_node = GojoNode {
+            version: 7,
+            ..Default::default()
+        };
+        let expected_right_ptr = NodePtr::<i32, i32>::from(right_node);
+        let bursted_node = GojoNode {
+            mods: Vec::from([
+                Mod::new(ModData::Right(NodePtr::null()), 2),
+                Mod::new(ModData::Right(NodePtr::null()), 3),
+                Mod::new(ModData::Right(NodePtr::null()), 4),
+                Mod::new(ModData::Right(NodePtr::null()), 4),
+                Mod::new(ModData::Right(NodePtr::null()), 5),
+                Mod::new(ModData::Right(NodePtr::null()), 6),
+            ]),
+            ..Default::default()
+        };
+        let mut bursted_node_ptr = NodePtr::<i32, i32>::from(bursted_node);
+        let version = 7;
+
+        // Act
+        bursted_node_ptr.set_right(expected_right_ptr, version);
+        let actual_right = bursted_node_ptr.right(version);
+
+        // Assert
+        assert_eq!(expected_right_ptr, actual_right);
+    }
+
+    #[test]
     fn test_insert_increasing() {
         // Arrange
         let mut m = Gojo::new();
