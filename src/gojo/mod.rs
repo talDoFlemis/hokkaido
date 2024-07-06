@@ -207,26 +207,32 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
     }
 
-    fn set_color(&mut self, color: Color, version: usize) -> Option<NodePtr<K, V>> {
+    fn set_color(&mut self, color: Color, version: usize) {
         debug_assert!(!self.is_null(), "Should not update a color on a null node");
 
-        let curr_color = self.get_color(version);
+        let mut ptr = self.get_latest_copy_for_version(version);
+
+        let curr_color = ptr.get_color(version);
         if color == curr_color {
-            return None;
+            return;
         }
 
         unsafe {
             let new_mod = ModData::Col(color);
-            self.set_modification(new_mod, version)
+            ptr.set_modification(new_mod, version);
         }
     }
 
-    fn set_red_color(&mut self, version: usize) -> Option<NodePtr<K, V>> {
-        self.set_color(Color::Red, version)
+    fn set_red_color(&mut self, version: usize) {
+        self.set_color(Color::Red, version);
     }
 
-    fn set_black_color(&mut self, version: usize) -> Option<NodePtr<K, V>> {
-        self.set_color(Color::Black, version)
+    fn set_black_color(&mut self, version: usize) {
+        self.set_color(Color::Black, version);
+    }
+
+    fn get_value(&self) -> V {
+        unsafe { (*self.pointer).value.clone() }
     }
 
     unsafe fn get_next_copy(&self) -> NodePtr<K, V> {
@@ -340,11 +346,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
     }
 
-    unsafe fn set_modification(
-        &mut self,
-        mod_data: ModData<K, V>,
-        version: usize,
-    ) -> Option<NodePtr<K, V>> {
+    unsafe fn set_modification(&mut self, mod_data: ModData<K, V>, version: usize) {
         if (*self.pointer).mods.len() < MAX_MODS {
             match mod_data {
                 ModData::Parent(p) => (*self.pointer).bk_ptr_parent = p,
@@ -356,7 +358,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
                 data: mod_data,
                 version,
             });
-            return None;
+            return;
         }
 
         // Create a new node with all mods and the new change right here
@@ -398,46 +400,46 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
 
         let mut bk_ptr_parent = (*new_node_ptr.pointer).bk_ptr_parent;
-
         // We got a new root boys
         if bk_ptr_parent.is_null() {
-            return Some(new_node_ptr);
+            return;
         }
 
         // Update parent back pontairos that can have a new root
-        let possible_new_root: Option<NodePtr<K, V>>;
         if new_node_ptr.is_left_child(version) {
-            possible_new_root = bk_ptr_parent.set_left(new_node_ptr, version);
+            bk_ptr_parent.set_left(new_node_ptr, version);
         } else {
-            possible_new_root = bk_ptr_parent.set_right(new_node_ptr, version);
-        }
-
-        possible_new_root
+            bk_ptr_parent.set_right(new_node_ptr, version);
+        };
     }
 
-    fn set_parent(&mut self, parent: NodePtr<K, V>, version: usize) -> Option<NodePtr<K, V>> {
+    fn set_parent(&mut self, parent: NodePtr<K, V>, version: usize) {
         debug_assert!(!self.is_null(), "Trying to change parent for null node");
+
+        let mut ptr = self.get_latest_copy_for_version(version);
         unsafe {
             let new_mod = ModData::Parent(parent);
-            self.set_modification(new_mod, version)
+            ptr.set_modification(new_mod, version);
         }
     }
 
-    fn set_left(&mut self, left: NodePtr<K, V>, version: usize) -> Option<NodePtr<K, V>> {
+    fn set_left(&mut self, left: NodePtr<K, V>, version: usize) {
         debug_assert!(!self.is_null(), "Trying to change left for null node");
 
+        let mut ptr = self.get_latest_copy_for_version(version);
         unsafe {
             let new_mod = ModData::Left(left);
-            self.set_modification(new_mod, version)
+            ptr.set_modification(new_mod, version);
         }
     }
 
-    fn set_right(&mut self, right: NodePtr<K, V>, version: usize) -> Option<NodePtr<K, V>> {
+    fn set_right(&mut self, right: NodePtr<K, V>, version: usize) {
         debug_assert!(!self.is_null(), "Trying to change right for null node");
 
+        let mut ptr = self.get_latest_copy_for_version(version);
         unsafe {
             let new_mod = ModData::Right(right);
-            self.set_modification(new_mod, version)
+            ptr.set_modification(new_mod, version);
         }
     }
 
@@ -590,12 +592,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
         self.root.is_null()
     }
 
-    fn set_possible_new_root(&mut self, possible_new_root: Option<NodePtr<K, V>>) {
-        if possible_new_root.is_some() {
-            self.root = possible_new_root.unwrap();
-        }
-    }
-
     pub fn predecessor(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
         todo!()
     }
@@ -606,125 +602,105 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
 
     unsafe fn left_rotate(&mut self, mut node: NodePtr<K, V>) {
         let mut temp = node.right(self.curr_version);
-        self.set_possible_new_root(node.set_right(temp.left(self.curr_version), self.curr_version));
+        node.set_right(temp.left(self.curr_version), self.curr_version);
 
         if !temp.left(self.curr_version).is_null() {
-            self.set_possible_new_root(
-                temp.left(self.curr_version)
-                    .set_parent(node, self.curr_version),
-            );
+            temp.left(self.curr_version)
+                .set_parent(node, self.curr_version);
         }
 
-        self.set_possible_new_root(
-            temp.set_parent(node.parent(self.curr_version), self.curr_version),
-        );
+        temp.set_parent(node.parent(self.curr_version), self.curr_version);
         if node.parent(self.curr_version).is_null() {
-            self.root = temp.clone();
+            self.root = temp;
         } else if node == temp.parent(self.curr_version).left(self.curr_version) {
-            self.set_possible_new_root(
-                node.parent(self.curr_version)
-                    .set_left(temp, self.curr_version),
-            );
+            node.parent(self.curr_version)
+                .set_left(temp, self.curr_version);
         } else {
-            self.set_possible_new_root(
-                node.parent(self.curr_version)
-                    .set_right(temp, self.curr_version),
-            );
+            node.parent(self.curr_version)
+                .set_right(temp, self.curr_version);
         }
 
-        self.set_possible_new_root(temp.set_left(node, self.curr_version));
-        self.set_possible_new_root(node.set_parent(temp, self.curr_version));
+        temp.set_left(node, self.curr_version);
+        node.set_parent(temp, self.curr_version);
     }
 
     unsafe fn right_rotate(&mut self, mut node: NodePtr<K, V>) {
-        let mut temp = node.left(self.curr_version);
-        self.set_possible_new_root(node.set_left(temp.right(self.curr_version), self.curr_version));
+        let version = self.curr_version;
+        let mut temp = node.left(version);
+        node.set_left(temp.right(version), version);
 
-        if !temp.right(self.curr_version).is_null() {
-            self.set_possible_new_root(
-                temp.right(self.curr_version)
-                    .set_parent(node, self.curr_version),
-            );
+        if !temp.right(version).is_null() {
+            temp.right(version).set_parent(node, version);
         }
 
-        self.set_possible_new_root(
-            temp.set_parent(node.parent(self.curr_version), self.curr_version),
-        );
-        if node.parent(self.curr_version).is_null() {
+        temp.set_parent(node.parent(version), version);
+        if node.parent(version).is_null() {
             self.root = temp.clone();
-        } else if node == node.parent(self.curr_version).right(self.curr_version) {
-            self.set_possible_new_root(
-                node.parent(self.curr_version)
-                    .set_right(temp, self.curr_version),
-            );
+        } else if node.is_right_child(version) {
+            node.parent(version).set_right(temp, version);
         } else {
-            self.set_possible_new_root(
-                node.parent(self.curr_version)
-                    .set_left(temp, self.curr_version),
-            );
+            node.parent(version).set_left(temp, version);
         }
 
-        self.set_possible_new_root(temp.set_right(node, self.curr_version));
-        self.set_possible_new_root(node.set_parent(temp, self.curr_version));
+        temp.set_right(node, version);
+        node.set_parent(temp, version);
     }
 
     unsafe fn insert_fixup(&mut self, node: NodePtr<K, V>) {
+        let version = self.curr_version;
         let mut dude = node;
-        while dude != self.root
-            && dude
-                .parent(self.curr_version)
-                .is_red_color(self.curr_version)
-        {
-            let mut parent = dude.parent(self.curr_version);
-            let mut gparent = parent.parent(self.curr_version);
-            if parent == gparent.left(self.curr_version) {
-                let mut uncle = gparent.right(self.curr_version);
+        while dude != self.root && dude.parent(version).is_red_color(version) {
+            let mut parent = dude.parent(version);
+            let mut gparent = parent.parent(version);
+            if parent == gparent.left(version) {
+                let mut uncle = gparent.right(version);
 
                 // Case 1
-                if uncle.is_red_color(self.curr_version) {
-                    self.set_possible_new_root(parent.set_black_color(self.curr_version));
-                    self.set_possible_new_root(uncle.set_black_color(self.curr_version));
-                    self.set_possible_new_root(gparent.set_red_color(self.curr_version));
+                if uncle.is_red_color(version) {
+                    parent.set_black_color(version);
+                    uncle.set_black_color(version);
+                    gparent.set_red_color(version);
                     dude = gparent;
                     continue;
                 }
 
                 // Case 2
-                if dude == parent.right(self.curr_version) {
+                if dude == parent.right(version) {
                     dude = parent;
                     self.left_rotate(dude);
                 }
 
                 // Case 3
-                self.set_possible_new_root(parent.set_black_color(self.curr_version));
-                self.set_possible_new_root(gparent.set_red_color(self.curr_version));
+                parent.set_black_color(version);
+                gparent.set_red_color(version);
                 self.right_rotate(gparent);
             } else {
-                let mut uncle = gparent.left(self.curr_version);
+                let mut uncle = gparent.left(version);
 
                 // Case 4
-                if uncle.is_red_color(self.curr_version) {
-                    self.set_possible_new_root(uncle.set_black_color(self.curr_version));
-                    self.set_possible_new_root(parent.set_black_color(self.curr_version));
-                    self.set_possible_new_root(gparent.set_red_color(self.curr_version));
+                if uncle.is_red_color(version) {
+                    uncle.set_black_color(version);
+                    parent.set_black_color(version);
+                    gparent.set_red_color(version);
                     dude = gparent;
                     continue;
                 }
 
                 // Case 5
-                if parent.left(self.curr_version) == dude {
+                if parent.left(version) == dude {
                     dude = parent;
                     self.right_rotate(dude);
                 }
 
                 // Case 6
-                self.set_possible_new_root(parent.set_black_color(self.curr_version));
-                self.set_possible_new_root(gparent.set_red_color(self.curr_version));
+                parent.set_black_color(version);
+                gparent.set_red_color(version);
                 self.left_rotate(gparent);
             }
         }
-        let possible_new_root = self.root.set_black_color(self.curr_version);
-        self.set_possible_new_root(possible_new_root);
+        let mut possible_new_root = self.root.get_latest_copy_for_version(version);
+        possible_new_root.set_black_color(version);
+        self.root = possible_new_root;
     }
 
     pub fn insert(&mut self, k: K, v: V) {
@@ -760,10 +736,10 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
             }
             match node.cmp(&y) {
                 Ordering::Less => {
-                    self.set_possible_new_root(y.set_left(node, self.curr_version));
+                    y.set_left(node, self.curr_version);
                 }
                 _ => {
-                    self.set_possible_new_root(y.set_right(node, self.curr_version));
+                    y.set_right(node, self.curr_version);
                 }
             };
         }
@@ -848,129 +824,10 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
         unsafe { Some(self.delete(node).1) }
     }
 
-    unsafe fn delete_fixup(&mut self, x: NodePtr<K, V>) {
-        let mut caba = x;
-        let version = self.curr_version;
-
-        while !caba.is_null() && caba.is_black_color(version) {
-            if caba.is_left_child(version) {
-                let mut w = caba.parent(version).right(version);
-
-                // Case 1
-                if w.is_red_color(version) {
-                    self.set_possible_new_root(w.set_black_color(version));
-                    self.set_possible_new_root(caba.parent(version).set_red_color(version));
-                    self.left_rotate(caba.parent(version));
-                    w = caba.parent(version).right(version);
-                }
-
-                // Case 2
-                if w.left(version).is_black_color(version)
-                    == w.right(version).is_black_color(version)
-                {
-                    self.set_possible_new_root(w.set_red_color(version));
-                    caba = caba.parent(version);
-                }
-                // Case 3
-                else if w.right(version).is_black_color(version) {
-                    self.set_possible_new_root(w.left(version).set_black_color(version));
-                    self.set_possible_new_root(w.set_red_color(version));
-                    self.right_rotate(caba.parent(version));
-                    w = x.parent(version).right(version);
-                }
-
-                // Case 4
-                self.set_possible_new_root(
-                    w.set_color(caba.parent(version).get_color(version), version),
-                );
-                self.set_possible_new_root(caba.parent(version).set_black_color(version));
-                self.set_possible_new_root(w.right(version).set_black_color(version));
-                self.left_rotate(caba.parent(version));
-                caba = self.root;
-            } else {
-                let mut w = caba.parent(version).left(version);
-
-                // Case 1
-                if w.is_red_color(version) {
-                    self.set_possible_new_root(w.set_black_color(version));
-                    self.set_possible_new_root(caba.parent(version).set_red_color(version));
-                    self.right_rotate(caba.parent(version));
-                    w = caba.parent(version).left(version);
-                }
-
-                // Case 2
-                if w.right(version).is_black_color(version)
-                    == w.left(version).is_black_color(version)
-                {
-                    self.set_possible_new_root(w.set_red_color(version));
-                    caba = caba.parent(version);
-                }
-                // Case 3
-                else if w.left(version).is_black_color(version) {
-                    self.set_possible_new_root(w.right(version).set_black_color(version));
-                    self.set_possible_new_root(w.set_red_color(version));
-                    self.left_rotate(caba.parent(version));
-                    w = x.parent(version).left(version);
-                }
-
-                // Case 4
-                self.set_possible_new_root(
-                    w.set_color(caba.parent(version).get_color(version), version),
-                );
-                self.set_possible_new_root(caba.parent(version).set_black_color(version));
-                self.set_possible_new_root(w.left(version).set_black_color(version));
-                self.right_rotate(caba.parent(version));
-                caba = self.root;
-            }
-
-            self.set_possible_new_root(caba.set_black_color(version));
-        }
-    }
-
-    unsafe fn transplant(&mut self, u: NodePtr<K, V>, mut v: NodePtr<K, V>) {
-        let version = self.curr_version;
-
-        if u.parent(version).is_null() {
-            self.root = v;
-        } else if u.is_left_child(version) {
-            self.set_possible_new_root(u.parent(version).set_left(v, version));
-        } else {
-            self.set_possible_new_root(u.parent(version).set_right(v, version));
-        }
-
-        self.set_possible_new_root(v.set_parent(u.parent(version), version));
-    }
+    unsafe fn delete_fixup(&mut self, x: NodePtr<K, V>) {}
 
     unsafe fn delete(&mut self, z: NodePtr<K, V>) -> (K, V) {
-        let version = self.curr_version;
-        let mut y = z;
-        let mut original_y_color = y.get_color(version);
-        let x;
-
-        if z.left(version).is_null() {
-            x = z.right(version);
-            self.transplant(z, x);
-        } else if z.right(version).is_null() {
-            x = z.left(version);
-            self.transplant(z, x);
-        } else {
-            y = self.successor(z);
-            x = y.right(version);
-            original_y_color = y.get_color(version);
-            self.set_possible_new_root(y.set_left(z.left(version), version));
-            self.set_possible_new_root(z.left(version).set_parent(y, version));
-            self.set_possible_new_root(y.set_right(z.right(version), version));
-            self.set_possible_new_root(z.right(version).set_parent(y, version));
-            self.transplant(z, y);
-            self.set_possible_new_root(y.set_color(z.get_color(version), version));
-        }
-
-        if original_y_color == Color::Black {
-            self.delete_fixup(x);
-        }
-
-        let kv = Box::from_raw(y.pointer);
-        kv.pair()
+        todo!()
     }
 }
 
@@ -1264,6 +1121,27 @@ mod tests {
 
         // Assert
         assert_eq!(expected_parent_ptr, actual_parent);
+    }
+
+    #[test]
+    fn test_bursted_root_is_setted_as_new_root() {
+        // Arrange
+        let mut gojo = Gojo::<i32, i32>::new();
+        let version = 7;
+
+        // Act
+        gojo.insert(5, 5);
+        gojo.insert(1, 1);
+        gojo.insert(8, 8);
+        gojo.insert(3, 3);
+        gojo.insert(2, 2);
+        gojo.insert(6, 6);
+        gojo.insert(7, 7);
+
+        // Assert
+        assert_eq!(gojo.root.get_value(), 5);
+        assert_eq!(gojo.root.get_color(version), Color::Black);
+        assert_eq!(gojo.root.version(), 7);
     }
 
     #[test]
