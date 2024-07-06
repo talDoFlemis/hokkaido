@@ -5,6 +5,7 @@ use std::ptr;
 use std::ptr::drop_in_place;
 
 pub mod parser;
+pub mod cli;
 
 const MAX_MODS: usize = 6;
 const DEFAULT_MAX_OPS: usize = 100;
