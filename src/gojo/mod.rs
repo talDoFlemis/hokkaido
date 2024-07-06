@@ -1,7 +1,6 @@
 use std::cmp::Ord;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
-use std::mem;
 use std::ptr;
 
 const MAX_MODS: usize = 6;
@@ -532,6 +531,14 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
         }
     }
 
+    pub fn predecessor(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
+        todo!()
+    }
+
+    pub fn successor(&self, node: NodePtr<K, V>) -> NodePtr<K, V> {
+        todo!()
+    }
+
     unsafe fn left_rotate(&mut self, mut node: NodePtr<K, V>) {
         let mut temp = node.right(self.curr_version);
         self.set_possible_new_root(node.set_right(temp.left(self.curr_version), self.curr_version));
@@ -772,171 +779,133 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
         if node.is_null() {
             return None;
         }
+        self.len -= 1;
         unsafe { Some(self.delete(node).1) }
     }
 
-    unsafe fn delete_fixup(&mut self, mut node: NodePtr<K, V>, mut parent: NodePtr<K, V>) {
-        let mut other;
-        while node != self.root && node.is_black_color(self.curr_version) {
-            if parent.left(self.curr_version) == node {
-                other = parent.right(self.curr_version);
-                if other.is_red_color(self.curr_version) {
-                    other.set_black_color(self.curr_version);
-                    parent.set_red_color(self.curr_version);
-                    self.left_rotate(parent);
-                    other = parent.right(self.curr_version);
+    unsafe fn delete_fixup(&mut self, x: NodePtr<K, V>) {
+        let mut caba = x;
+        let version = self.curr_version;
+
+        while !caba.is_null() && caba.is_black_color(version) {
+            if caba.is_left_child(version) {
+                let mut w = caba.parent(version).right(version);
+
+                // Case 1
+                if w.is_red_color(version) {
+                    self.set_possible_new_root(w.set_black_color(version));
+                    self.set_possible_new_root(caba.parent(version).set_red_color(version));
+                    self.left_rotate(caba.parent(version));
+                    w = caba.parent(version).right(version);
                 }
 
-                if other
-                    .left(self.curr_version)
-                    .is_black_color(self.curr_version)
-                    && other
-                        .right(self.curr_version)
-                        .is_black_color(self.curr_version)
+                // Case 2
+                if w.left(version).is_black_color(version)
+                    == w.right(version).is_black_color(version)
                 {
-                    other.set_red_color(self.curr_version);
-                    node = parent;
-                    parent = node.parent(self.curr_version);
-                } else {
-                    if other
-                        .right(self.curr_version)
-                        .is_black_color(self.curr_version)
-                    {
-                        other
-                            .left(self.curr_version)
-                            .set_black_color(self.curr_version);
-                        other.set_red_color(self.curr_version);
-                        self.right_rotate(other);
-                        other = parent.right(self.curr_version);
-                    }
-                    other.set_color(parent.get_color(self.curr_version), self.curr_version);
-                    parent.set_black_color(self.curr_version);
-                    other
-                        .right(self.curr_version)
-                        .set_black_color(self.curr_version);
-                    self.left_rotate(parent);
-                    node = self.root;
-                    break;
+                    self.set_possible_new_root(w.set_red_color(version));
+                    caba = caba.parent(version);
                 }
+                // Case 3
+                else if w.right(version).is_black_color(version) {
+                    self.set_possible_new_root(w.left(version).set_black_color(version));
+                    self.set_possible_new_root(w.set_red_color(version));
+                    self.right_rotate(caba.parent(version));
+                    w = x.parent(version).right(version);
+                }
+
+                // Case 4
+                self.set_possible_new_root(
+                    w.set_color(caba.parent(version).get_color(version), version),
+                );
+                self.set_possible_new_root(caba.parent(version).set_black_color(version));
+                self.set_possible_new_root(w.right(version).set_black_color(version));
+                self.left_rotate(caba.parent(version));
+                caba = self.root;
             } else {
-                other = parent.left(self.curr_version);
-                if other.is_red_color(self.curr_version) {
-                    other.set_black_color(self.curr_version);
-                    parent.set_red_color(self.curr_version);
-                    self.right_rotate(parent);
-                    other = parent.left(self.curr_version);
+                let mut w = caba.parent(version).left(version);
+
+                // Case 1
+                if w.is_red_color(version) {
+                    self.set_possible_new_root(w.set_black_color(version));
+                    self.set_possible_new_root(caba.parent(version).set_red_color(version));
+                    self.right_rotate(caba.parent(version));
+                    w = caba.parent(version).left(version);
                 }
 
-                if other
-                    .left(self.curr_version)
-                    .is_black_color(self.curr_version)
-                    && other
-                        .right(self.curr_version)
-                        .is_black_color(self.curr_version)
+                // Case 2
+                if w.right(version).is_black_color(version)
+                    == w.left(version).is_black_color(version)
                 {
-                    other.set_red_color(self.curr_version);
-                    node = parent;
-                    parent = node.parent(self.curr_version);
-                } else {
-                    if other
-                        .left(self.curr_version)
-                        .is_black_color(self.curr_version)
-                    {
-                        other
-                            .right(self.curr_version)
-                            .set_black_color(self.curr_version);
-                        other.set_red_color(self.curr_version);
-                        self.left_rotate(other);
-                        other = parent.left(self.curr_version);
-                    }
-                    other.set_color(parent.get_color(self.curr_version), self.curr_version);
-                    parent.set_black_color(self.curr_version);
-                    other
-                        .left(self.curr_version)
-                        .set_black_color(self.curr_version);
-                    self.right_rotate(parent);
-                    node = self.root;
-                    break;
+                    self.set_possible_new_root(w.set_red_color(version));
+                    caba = caba.parent(version);
                 }
-            }
-        }
+                // Case 3
+                else if w.left(version).is_black_color(version) {
+                    self.set_possible_new_root(w.right(version).set_black_color(version));
+                    self.set_possible_new_root(w.set_red_color(version));
+                    self.left_rotate(caba.parent(version));
+                    w = x.parent(version).left(version);
+                }
 
-        node.set_black_color(self.curr_version);
+                // Case 4
+                self.set_possible_new_root(
+                    w.set_color(caba.parent(version).get_color(version), version),
+                );
+                self.set_possible_new_root(caba.parent(version).set_black_color(version));
+                self.set_possible_new_root(w.left(version).set_black_color(version));
+                self.right_rotate(caba.parent(version));
+                caba = self.root;
+            }
+
+            self.set_possible_new_root(caba.set_black_color(version));
+        }
     }
 
-    unsafe fn delete(&mut self, node: NodePtr<K, V>) -> (K, V) {
-        let mut child;
-        let mut parent;
-        let color;
+    unsafe fn transplant(&mut self, u: NodePtr<K, V>, mut v: NodePtr<K, V>) {
+        let version = self.curr_version;
 
-        self.len -= 1;
-        if !node.left(self.curr_version).is_null() && !node.right(self.curr_version).is_null() {
-            let mut replace = node.right(self.curr_version).min_node(self.curr_version);
-            if node == self.root {
-                self.root = replace;
-            } else if node.parent(self.curr_version).left(self.curr_version) == node {
-                node.parent(self.curr_version)
-                    .set_left(replace, self.curr_version);
-            } else {
-                node.parent(self.curr_version)
-                    .set_right(replace, self.curr_version);
-            }
-
-            child = replace.right(self.curr_version);
-            parent = replace.parent(self.curr_version);
-            color = replace.get_color(self.curr_version);
-            if parent == node {
-                parent = replace;
-            } else {
-                if !child.is_null() {
-                    child.set_parent(parent, self.curr_version);
-                }
-                parent.set_left(child, self.curr_version);
-                replace.set_right(node.right(self.curr_version), self.curr_version);
-                node.right(self.curr_version)
-                    .set_parent(replace, self.curr_version);
-            }
-
-            replace.set_parent(node.parent(self.curr_version), self.curr_version);
-            replace.set_color(node.get_color(self.curr_version), self.curr_version);
-            replace.set_left(node.left(self.curr_version), self.curr_version);
-            node.left(self.curr_version)
-                .set_parent(replace, self.curr_version);
-
-            if color == Color::Black {
-                self.delete_fixup(child, parent);
-            }
-
-            let obj = Box::from_raw(node.pointer);
-            return obj.pair();
-        }
-
-        if !node.left(self.curr_version).is_null() {
-            child = node.left(self.curr_version);
+        if u.parent(version).is_null() {
+            self.root = v;
+        } else if u.is_left_child(version) {
+            self.set_possible_new_root(u.parent(version).set_left(v, version));
         } else {
-            child = node.right(self.curr_version);
+            self.set_possible_new_root(u.parent(version).set_right(v, version));
         }
 
-        parent = node.parent(self.curr_version);
-        color = node.get_color(self.curr_version);
-        if !child.is_null() {
-            child.set_parent(parent, self.curr_version);
-        }
+        self.set_possible_new_root(v.set_parent(u.parent(version), version));
+    }
 
-        if self.root == node {
-            self.root = child
-        } else if parent.left(self.curr_version) == node {
-            parent.set_left(child, self.curr_version);
+    unsafe fn delete(&mut self, z: NodePtr<K, V>) -> (K, V) {
+        let version = self.curr_version;
+        let mut y = z;
+        let mut original_y_color = y.get_color(version);
+        let x;
+
+        if z.left(version).is_null() {
+            x = z.right(version);
+            self.transplant(z, x);
+        } else if z.right(version).is_null() {
+            x = z.left(version);
+            self.transplant(z, x);
         } else {
-            parent.set_right(child, self.curr_version);
+            y = self.successor(z);
+            x = y.right(version);
+            original_y_color = y.get_color(version);
+            self.set_possible_new_root(y.set_left(z.left(version), version));
+            self.set_possible_new_root(z.left(version).set_parent(y, version));
+            self.set_possible_new_root(y.set_right(z.right(version), version));
+            self.set_possible_new_root(z.right(version).set_parent(y, version));
+            self.transplant(z, y);
+            self.set_possible_new_root(y.set_color(z.get_color(version), version));
         }
 
-        if color == Color::Black {
-            self.delete_fixup(child, parent);
+        if original_y_color == Color::Black {
+            self.delete_fixup(x);
         }
 
-        let obj = Box::from_raw(node.pointer);
-        obj.pair()
+        let kv = Box::from_raw(y.pointer);
+        kv.pair()
     }
 }
 
@@ -947,7 +916,7 @@ mod tests {
     use super::Gojo;
 
     #[test]
-    fn test_insert() {
+    fn test_insert_increasing() {
         // Arrange
         let mut m = Gojo::new();
         let maximum = 10;
@@ -982,6 +951,41 @@ mod tests {
     }
 
     #[test]
+    fn test_insert_decreasing() {
+        // Arrange
+        let mut m = Gojo::new();
+        let maximum = 10;
+
+        // Act
+        for key in (1..=maximum).rev() {
+            m.insert(key, key << 2);
+        }
+
+        // Assert
+        assert_eq!(unsafe { (*m.root.pointer).key }, 7);
+        let expected = [
+            (1, Color::Red),
+            (2, Color::Black),
+            (3, Color::Red),
+            (4, Color::Black),
+            (5, Color::Black),
+            (6, Color::Black),
+            (7, Color::Black),
+            (8, Color::Black),
+            (9, Color::Black),
+            (10, Color::Black),
+        ];
+        for (key, color) in expected.iter() {
+            let ptr = m.find_node(key, maximum);
+            assert!(!ptr.is_null());
+            unsafe {
+                assert_eq!((*ptr.pointer).key, *key);
+                assert_eq!(ptr.get_color(maximum), *color);
+            }
+        }
+    }
+
+    #[test]
     fn test_cant_find_element_if_not_in_good_version() {
         // Arrange
         let mut m = Gojo::new();
@@ -998,6 +1002,22 @@ mod tests {
             assert!(m.get(&key, key).is_some());
             assert!(m.get(&(key + 1), key).is_none());
         }
+    }
+
+    #[test]
+    fn test_remove_red_node() {
+        // Arrange
+        let mut m = Gojo::new();
+        let maximum = 10;
+
+        // Act
+        for key in 1..=maximum {
+            m.insert(key, key << 2);
+        }
+        let res = m.remove(&10);
+
+        // Assert
+        assert!(res.is_some());
     }
 
     #[test]
