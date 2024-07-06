@@ -2,6 +2,7 @@
 name = "hokkaido"
 version = "0.1.0"
 edition = "2021"
+authors = ["Said Rodrigues <coderflemis@gmail.com>"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,3 +12,8 @@ clap = { version = "4.5.8", features = ["derive"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
+
+[[bin]]
+name = "gojo"
+doc = false
+path = "src/bin/gojo.rs"
