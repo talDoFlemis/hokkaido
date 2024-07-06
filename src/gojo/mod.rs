@@ -21,6 +21,7 @@ enum ModData<K: Ord + Clone + Default, V: Clone + Default> {
     Col(Color),
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 struct Mod<K: Ord + Clone + Default, V: Clone + Default> {
     data: ModData<K, V>,
     version: usize,
@@ -32,6 +33,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Mod<K, V> {
     }
 }
 
+#[derive(PartialEq, Eq, Clone)]
 struct GojoNode<K: Ord + Clone + Default, V: Clone + Default> {
     color: Color,
     left: NodePtr<K, V>,
@@ -45,6 +47,21 @@ struct GojoNode<K: Ord + Clone + Default, V: Clone + Default> {
     mods: Vec<Mod<K, V>>,
     next_copy: NodePtr<K, V>,
     version: usize,
+}
+
+impl<K, V> Debug for GojoNode<K, V>
+where
+    K: Ord + Clone + Default + Debug,
+    V: Clone + Default + Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GojoNode")
+            .field("color", &self.color)
+            .field("key", &self.key)
+            .field("value", &self.value)
+            .field("version", &self.version)
+            .finish()
+    }
 }
 
 impl<K: Ord + Clone + Default, V: Clone + Default> GojoNode<K, V> {
@@ -117,20 +134,28 @@ impl<K: Ord + Clone + Default, V: Clone + Default> GojoNode<K, V> {
     }
 }
 
-impl<K, V> Debug for GojoNode<K, V>
-where
-    K: Ord + Debug + Clone + Default,
-    V: Debug + Clone + Default,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "k:{:?} v:{:?} c:{:?}", self.key, self.value, self.color)
-    }
-}
-
-#[derive(Debug)]
 struct NodePtr<K: Ord + Clone + Default, V: Clone + Default> {
     pointer: *mut GojoNode<K, V>,
     null: bool,
+}
+
+impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Debug for NodePtr<K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.is_null() {
+            true => f
+                .debug_struct("NodePtr")
+                .field("pointer", &"nilson")
+                .field("null", &self.null)
+                .finish(),
+            false => unsafe {
+                let res = &(*self.pointer);
+                f.debug_struct("NodePtr")
+                    .field("pointer", res)
+                    .field("null", &self.null)
+                    .finish()
+            },
+        }
+    }
 }
 
 impl<K: Ord + Clone + Default, V: Clone + Default> Clone for NodePtr<K, V> {
@@ -528,7 +553,8 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 }
 
-pub struct Gojo<K: Ord + Clone + Default, V: Clone + Default> {
+#[derive(Debug)]
+pub struct Gojo<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> {
     root: NodePtr<K, V>,
     len: usize,
     curr_version: usize,
@@ -536,19 +562,19 @@ pub struct Gojo<K: Ord + Clone + Default, V: Clone + Default> {
     nil: NodePtr<K, V>,
 }
 
-unsafe impl<K: Ord + Clone + Default, V: Clone + Default> Send for Gojo<K, V> {}
+unsafe impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Send for Gojo<K, V> {}
 
-unsafe impl<K: Ord + Clone + Default, V: Clone + Default> Sync for Gojo<K, V> {}
+unsafe impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Sync for Gojo<K, V> {}
 
 // Drop all owned pointers if the tree is dropped
-impl<K: Ord + Clone + Default, V: Clone + Default> Drop for Gojo<K, V> {
+impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Drop for Gojo<K, V> {
     fn drop(&mut self) {
         self.clear();
     }
 }
 
 /// If key and value are both impl Clone, we can call clone to get a copy.
-impl<K: Ord + Clone + Default, V: Clone + Default> Clone for Gojo<K, V> {
+impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Clone for Gojo<K, V> {
     fn clone(&self) -> Gojo<K, V> {
         unsafe {
             let mut new = Gojo::new();
@@ -559,7 +585,22 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Clone for Gojo<K, V> {
     }
 }
 
-impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
+impl<K, V> Gojo<K, V>
+where
+    K: Ord + Clone + Default + Debug,
+    V: Clone + Default + Debug,
+{
+    fn print_in_order(&self, node: NodePtr<K, V>) {
+        if node.is_null() {
+            return;
+        }
+        self.print_in_order(node.left(self.curr_version));
+        println!("{:?}", node);
+        self.print_in_order(node.right(self.curr_version));
+    }
+}
+
+impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
     /// Creates an empty `RBTree`.
     pub fn new() -> Gojo<K, V> {
         let mut nil = NodePtr::new(K::default(), V::default());
@@ -601,101 +642,99 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
     }
 
     unsafe fn left_rotate(&mut self, mut node: NodePtr<K, V>) {
-        let mut temp = node.right(self.curr_version);
-        node.set_right(temp.left(self.curr_version), self.curr_version);
+        let mut caba = node;
+        let version = self.curr_version;
+        let mut temp = caba.right(version);
+        caba.set_right(temp.left(version), version);
 
-        if !temp.left(self.curr_version).is_null() {
-            temp.left(self.curr_version)
-                .set_parent(node, self.curr_version);
+        if !temp.left(version).is_null() {
+            temp.left(version).set_parent(caba, version);
         }
 
-        temp.set_parent(node.parent(self.curr_version), self.curr_version);
-        if node.parent(self.curr_version).is_null() {
+        temp.set_parent(caba.parent(version), version);
+        if caba.parent(version).is_null() {
             self.root = temp;
-        } else if node == temp.parent(self.curr_version).left(self.curr_version) {
-            node.parent(self.curr_version)
-                .set_left(temp, self.curr_version);
+        } else if caba.is_left_child(version) {
+            caba.parent(version).set_left(temp, version);
         } else {
-            node.parent(self.curr_version)
-                .set_right(temp, self.curr_version);
+            caba.parent(version).set_right(temp, version);
         }
 
-        temp.set_left(node, self.curr_version);
-        node.set_parent(temp, self.curr_version);
+        temp.set_left(caba, version);
+        caba.set_parent(temp, version);
     }
 
     unsafe fn right_rotate(&mut self, mut node: NodePtr<K, V>) {
+        let mut caba = node;
         let version = self.curr_version;
-        let mut temp = node.left(version);
-        node.set_left(temp.right(version), version);
+        let mut temp = caba.left(version);
+        caba.set_left(temp.right(version), version);
 
         if !temp.right(version).is_null() {
-            temp.right(version).set_parent(node, version);
+            temp.right(version).set_parent(caba, version);
         }
 
-        temp.set_parent(node.parent(version), version);
-        if node.parent(version).is_null() {
-            self.root = temp.clone();
-        } else if node.is_right_child(version) {
-            node.parent(version).set_right(temp, version);
+        temp.set_parent(caba.parent(version), version);
+        if caba.parent(version).is_null() {
+            self.root = temp;
+        } else if caba.is_right_child(version) {
+            caba.parent(version).set_right(temp, version);
         } else {
-            node.parent(version).set_left(temp, version);
+            caba.parent(version).set_left(temp, version);
         }
 
-        temp.set_right(node, version);
-        node.set_parent(temp, version);
+        temp.set_right(caba, version);
+        caba.set_parent(temp, version);
     }
 
     unsafe fn insert_fixup(&mut self, node: NodePtr<K, V>) {
         let version = self.curr_version;
         let mut dude = node;
         while dude != self.root && dude.parent(version).is_red_color(version) {
-            let mut parent = dude.parent(version);
-            let mut gparent = parent.parent(version);
-            if parent == gparent.left(version) {
-                let mut uncle = gparent.right(version);
+            if dude.parent(version).is_left_child(version) {
+                let mut uncle = dude.parent(version).parent(version).right(version);
 
                 // Case 1
                 if uncle.is_red_color(version) {
-                    parent.set_black_color(version);
+                    dude.parent(version).set_black_color(version);
                     uncle.set_black_color(version);
-                    gparent.set_red_color(version);
-                    dude = gparent;
+                    dude.parent(version).parent(version).set_red_color(version);
+                    dude = dude.parent(version).parent(version);
                     continue;
                 }
 
                 // Case 2
-                if dude == parent.right(version) {
-                    dude = parent;
+                if dude.is_right_child(version) {
+                    dude = dude.parent(version);
                     self.left_rotate(dude);
                 }
 
                 // Case 3
-                parent.set_black_color(version);
-                gparent.set_red_color(version);
-                self.right_rotate(gparent);
+                dude.parent(version).set_black_color(version);
+                dude.parent(version).parent(version).set_red_color(version);
+                self.right_rotate(dude.parent(version).parent(version));
             } else {
-                let mut uncle = gparent.left(version);
+                let mut uncle = dude.parent(version).parent(version).left(version);
 
                 // Case 4
                 if uncle.is_red_color(version) {
                     uncle.set_black_color(version);
-                    parent.set_black_color(version);
-                    gparent.set_red_color(version);
-                    dude = gparent;
+                    dude.parent(version).set_black_color(version);
+                    dude.parent(version).parent(version).set_red_color(version);
+                    dude = dude.parent(version).parent(version);
                     continue;
                 }
 
                 // Case 5
-                if parent.left(version) == dude {
-                    dude = parent;
+                if dude.is_left_child(version) {
+                    dude = dude.parent(version);
                     self.right_rotate(dude);
                 }
 
                 // Case 6
-                parent.set_black_color(version);
-                gparent.set_red_color(version);
-                self.left_rotate(gparent);
+                dude.parent(version).set_black_color(version);
+                dude.parent(version).parent(version).set_red_color(version);
+                self.left_rotate(dude.parent(version).parent(version));
             }
         }
         let mut possible_new_root = self.root.get_latest_copy_for_version(version);
@@ -709,6 +748,10 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Gojo<K, V> {
         let mut y = NodePtr::null();
         let mut x = self.roots[self.curr_version];
         self.curr_version += 1;
+
+        unsafe {
+            (*node.pointer).version = self.curr_version;
+        }
 
         while !x.is_null() {
             y = x;
