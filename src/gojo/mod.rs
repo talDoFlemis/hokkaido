@@ -987,30 +987,15 @@ mod tests {
             color: Color::Black,
             ..Default::default()
         };
+        let ptr = NodePtr::<i32, i32>::from(no_mods_node);
+        let expect_color = Color::Black;
         let version = 1;
 
         // Act
-        let ptr = NodePtr::<i32, i32>::from(no_mods_node);
+        let actual_color = ptr.get_color(version);
 
         // Assert
-        assert_eq!(ptr.get_color(version), Color::Black);
-    }
-
-    #[test]
-    fn test_get_color_with_single_mod() {
-        // Arrange
-        let single_mod_node = GojoNode {
-            color: Color::Black,
-            mods: Vec::from([Mod::new(ModData::Col(Color::Red), 2)]),
-            ..Default::default()
-        };
-        let version = 2;
-
-        // Act
-        let ptr = NodePtr::<i32, i32>::from(single_mod_node);
-
-        // Assert
-        assert_eq!(ptr.get_color(version), Color::Red);
+        assert_eq!(expect_color, actual_color);
     }
 
     #[test]
@@ -1027,13 +1012,15 @@ mod tests {
             ]),
             ..Default::default()
         };
+        let ptr = NodePtr::<i32, i32>::from(five_mod_node);
+        let expected_color = Color::Red;
         let version = 6;
 
         // Act
-        let ptr = NodePtr::<i32, i32>::from(five_mod_node);
+        let actual_color = ptr.get_color(version);
 
         // Assert
-        assert_eq!(ptr.get_color(version), Color::Red);
+        assert_eq!(expected_color, actual_color);
     }
 
     #[test]
