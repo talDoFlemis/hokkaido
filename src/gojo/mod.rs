@@ -29,6 +29,7 @@ struct Mod<K: Ord + Clone + Default, V: Clone + Default> {
 }
 
 impl<K: Ord + Clone + Default, V: Clone + Default> Mod<K, V> {
+    #[allow(dead_code)]
     fn new(data: ModData<K, V>, version: usize) -> Self {
         Self { data, version }
     }
@@ -254,6 +255,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         self.set_color(Color::Black, version);
     }
 
+    #[allow(dead_code)]
     fn get_value(&self) -> V {
         unsafe { (*self.pointer).value.clone() }
     }
@@ -333,40 +335,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
             temp = temp.right(version);
         }
         temp
-    }
-
-    fn next(self, version: usize) -> NodePtr<K, V> {
-        if !self.right(version).is_null() {
-            self.right(version).min_node(version)
-        } else {
-            let mut temp = self;
-            loop {
-                if temp.parent(version).is_null() {
-                    return NodePtr::null();
-                }
-                if temp.is_left_child(version) {
-                    return temp.parent(version);
-                }
-                temp = temp.parent(version);
-            }
-        }
-    }
-
-    fn prev(self, version: usize) -> NodePtr<K, V> {
-        if !self.left(version).is_null() {
-            self.left(version).max_node(version)
-        } else {
-            let mut temp = self;
-            loop {
-                if temp.parent(version).is_null() {
-                    return NodePtr::null();
-                }
-                if temp.is_right_child(version) {
-                    return temp.parent(version);
-                }
-                temp = temp.parent(version);
-            }
-        }
     }
 
     unsafe fn set_modification(&mut self, mod_data: ModData<K, V>, version: usize) {
@@ -590,6 +558,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Clone for Goj
     }
 }
 
+#[allow(dead_code)]
 impl<K, V> Gojo<K, V>
 where
     K: Ord + Clone + Default + Debug,
