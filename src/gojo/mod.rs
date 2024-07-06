@@ -360,11 +360,15 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
 
         // Create a new node with all mods and the new change right here
-        let new_gojo_node = (*self.pointer).clone_with_latest_mods();
+        let mut new_gojo_node = (*self.pointer).clone_with_latest_mods();
+        new_gojo_node.version = version;
+
         let new_node_ptr = NodePtr {
             pointer: Box::into_raw(Box::new(new_gojo_node)),
             null: false,
         };
+        (*self.pointer).next_copy = new_node_ptr;
+
         match mod_data {
             ModData::Parent(p) => {
                 (*new_node_ptr.pointer).parent = p;
@@ -442,8 +446,9 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
             return NodePtr::null();
         }
         unsafe {
-            let mut value = (*self.pointer).parent;
-            for m in (*self.pointer).mods.iter() {
+            let ptr = self.get_latest_copy_for_version(version);
+            let mut value = (*ptr.pointer).parent;
+            for m in (*ptr.pointer).mods.iter() {
                 if m.version > version {
                     break;
                 }
@@ -461,8 +466,9 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
 
         unsafe {
-            let mut value = (*self.pointer).left;
-            for m in (*self.pointer).mods.iter() {
+            let ptr = self.get_latest_copy_for_version(version);
+            let mut value = (*ptr.pointer).left;
+            for m in (*ptr.pointer).mods.iter() {
                 if m.version > version {
                     break;
                 }
@@ -479,8 +485,9 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
             return NodePtr::null();
         }
         unsafe {
-            let mut value = (*self.pointer).right;
-            for m in (*self.pointer).mods.iter() {
+            let ptr = self.get_latest_copy_for_version(version);
+            let mut value = (*ptr.pointer).right;
+            for m in (*ptr.pointer).mods.iter() {
                 if m.version > version {
                     break;
                 }
@@ -1031,13 +1038,8 @@ mod tests {
 
     #[test]
     fn test_get_color_with_bursted_node() {
+        // Arrange
         let version = 7;
-        let next_copy = GojoNode {
-            version,
-            color: Color::Black,
-            ..Default::default()
-        };
-        let next_ptr = NodePtr::from(next_copy);
         let bursted_node = GojoNode {
             version: 1,
             color: Color::Black,
@@ -1048,15 +1050,88 @@ mod tests {
                 Mod::new(ModData::Col(Color::Black), 5),
                 Mod::new(ModData::Col(Color::Red), 6),
             ]),
-            next_copy: next_ptr,
             ..Default::default()
         };
+        let mut bursted_node_ptr = NodePtr::<i32, i32>::from(bursted_node);
 
         // Act
-        let ptr = NodePtr::<i32, i32>::from(bursted_node);
+        bursted_node_ptr.set_color(Color::Black, version);
+        let actual_color = bursted_node_ptr.get_color(version);
 
         // Assert
-        assert_eq!(ptr.get_color(version), Color::Black);
+        assert_eq!(actual_color, Color::Black);
+    }
+
+    #[test]
+    fn test_get_left_without_mods() {
+        // Arrange
+        let no_mods_node = GojoNode {
+            ..Default::default()
+        };
+        let ptr = NodePtr::<i32, i32>::from(no_mods_node);
+        let version = 1;
+
+        // Act
+        let actual_left = ptr.left(version);
+
+        // Assert
+        assert!(actual_left.is_null());
+    }
+
+    #[test]
+    fn test_get_left_with_five_mods() {
+        // Arrange
+        let left = GojoNode {
+            ..Default::default()
+        };
+        let expected_left = NodePtr::<i32, i32>::from(left);
+        let five_mods_node = GojoNode {
+            mods: Vec::from([
+                Mod::new(ModData::Left(NodePtr::null()), 2),
+                Mod::new(ModData::Left(NodePtr::null()), 3),
+                Mod::new(ModData::Left(NodePtr::null()), 4),
+                Mod::new(ModData::Left(expected_left), 5),
+            ]),
+            ..Default::default()
+        };
+        let ptr = NodePtr::<i32, i32>::from(five_mods_node);
+        let version = 5;
+
+        // Act
+        let actual_left = ptr.left(version);
+
+        // Assert
+        assert_eq!(expected_left, actual_left);
+    }
+
+    #[test]
+    fn test_get_left_with_bursted_node() {
+        // Arrange
+        let left_node = GojoNode {
+            version: 7,
+            ..Default::default()
+        };
+        let expected_left_ptr = NodePtr::<i32, i32>::from(left_node);
+        let bursted_node = GojoNode {
+            mods: Vec::from([
+                Mod::new(ModData::Left(NodePtr::null()), 2),
+                Mod::new(ModData::Left(NodePtr::null()), 3),
+                Mod::new(ModData::Left(NodePtr::null()), 4),
+                Mod::new(ModData::Left(NodePtr::null()), 4),
+                Mod::new(ModData::Left(NodePtr::null()), 5),
+                Mod::new(ModData::Left(NodePtr::null()), 6),
+            ]),
+            ..Default::default()
+        };
+        let mut bursted_node_ptr = NodePtr::<i32, i32>::from(bursted_node);
+        let version = 7;
+
+        // Act
+        bursted_node_ptr.set_left(expected_left_ptr, version);
+        let actual_left = bursted_node_ptr.left(version);
+
+        // Assert
+        assert_eq!(expected_left_ptr, actual_left);
     }
 
     #[test]
