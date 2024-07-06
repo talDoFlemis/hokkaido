@@ -5,7 +5,7 @@ use std::ptr;
 use std::ptr::drop_in_place;
 
 const MAX_MODS: usize = 6;
-const MAX_OPS: usize = 20;
+const DEFAULT_MAX_OPS: usize = 100;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 enum Color {
@@ -560,6 +560,12 @@ pub struct Gojo<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> {
     nil: NodePtr<K, V>,
 }
 
+impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Default for Gojo<K, V> {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_OPS)
+    }
+}
+
 unsafe impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Send for Gojo<K, V> {}
 
 unsafe impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Sync for Gojo<K, V> {}
@@ -575,7 +581,8 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Drop for Gojo
 impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Clone for Gojo<K, V> {
     fn clone(&self) -> Gojo<K, V> {
         unsafe {
-            let mut new = Gojo::new();
+            let amount_of_ops = self.roots.len();
+            let mut new = Gojo::new(amount_of_ops);
             new.root = self.root.deep_clone(self.curr_version);
             new.len = self.len;
             new
@@ -600,13 +607,14 @@ where
 
 impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
     /// Creates an empty `RBTree`.
-    pub fn new() -> Gojo<K, V> {
+    pub fn new(predected_amount_of_ops: usize) -> Gojo<K, V> {
         let mut nil = NodePtr::new(K::default(), V::default());
         nil.null = true;
         unsafe {
             (*(nil.pointer)).color = Color::Black;
         }
-        let roots = Vec::from([nil]);
+        let mut roots = Vec::with_capacity(predected_amount_of_ops);
+        roots.push(nil);
         Gojo {
             root: NodePtr::null(),
             len: 0,
@@ -672,7 +680,6 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
 
         unsafe { Some(&(*succ.pointer).value) }
     }
-
 
     fn successor_helper(&self, node: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
         let mut x = node;
@@ -1325,7 +1332,7 @@ mod tests {
     #[test]
     fn test_bursted_root_is_setted_as_new_root() {
         // Arrange
-        let mut gojo = Gojo::<i32, i32>::new();
+        let mut gojo = Gojo::<i32, i32>::default();
         let version = 7;
 
         // Act
@@ -1346,7 +1353,7 @@ mod tests {
     #[test]
     fn test_insert_increasing() {
         // Arrange
-        let mut m = Gojo::new();
+        let mut m = Gojo::default();
         let maximum = 10;
 
         // Act
@@ -1381,7 +1388,7 @@ mod tests {
     #[test]
     fn test_insert_decreasing() {
         // Arrange
-        let mut m = Gojo::new();
+        let mut m = Gojo::default();
         let maximum = 10;
 
         // Act
@@ -1416,7 +1423,7 @@ mod tests {
     #[test]
     fn test_cant_find_element_if_not_in_good_version() {
         // Arrange
-        let mut m = Gojo::new();
+        let mut m = Gojo::default();
         let upper_limit = 100;
 
         // Act
@@ -1435,7 +1442,7 @@ mod tests {
     #[test]
     fn test_remove_red_node() {
         // Arrange
-        let mut m = Gojo::new();
+        let mut m = Gojo::default();
         let maximum = 10;
 
         // Act
@@ -1455,7 +1462,7 @@ mod tests {
     #[test]
     fn test_remove() {
         // Arrange
-        let mut m = Gojo::new();
+        let mut m = Gojo::default();
         let maximum = 100;
 
         // Act
@@ -1477,7 +1484,7 @@ mod tests {
     #[test]
     fn test_empty_remove() {
         // Arrange
-        let mut m: Gojo<isize, bool> = Gojo::new();
+        let mut m: Gojo<isize, bool> = Gojo::default();
 
         // Act
         let res = m.remove(&0);
@@ -1489,7 +1496,7 @@ mod tests {
     #[test]
     fn test_is_empty() {
         // Arrange
-        let mut m = Gojo::new();
+        let mut m = Gojo::default();
 
         // Act
         m.insert(1, 2);
@@ -1503,7 +1510,7 @@ mod tests {
     #[test]
     fn test_successor_up_on_tree() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
         let expected_succ = &2;
         let version = 3;
 
@@ -1522,7 +1529,7 @@ mod tests {
     #[test]
     fn test_successor_in_right_tree() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
         let expected_succ = &3;
         let version = 3;
 
@@ -1541,7 +1548,7 @@ mod tests {
     #[test]
     fn test_no_successor() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
         let version = 3;
 
         // Act
@@ -1558,7 +1565,7 @@ mod tests {
     #[test]
     fn test_successor_in_different_versions() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
 
         // Act
         gojo.insert(1, 1);
@@ -1577,7 +1584,7 @@ mod tests {
     #[test]
     fn test_predecessor_left_tree() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
         let expected_pred = &1;
         let version = 3;
 
@@ -1596,7 +1603,7 @@ mod tests {
     #[test]
     fn test_predecessor_up_on_tree() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
         let expected_pred = &2;
         let version = 3;
 
@@ -1615,7 +1622,7 @@ mod tests {
     #[test]
     fn test_no_predecessor() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
         let version = 3;
 
         // Act
@@ -1632,7 +1639,7 @@ mod tests {
     #[test]
     fn test_predecessor_in_different_versions() {
         // Arrange
-        let mut gojo: Gojo<usize, i32> = Gojo::new();
+        let mut gojo: Gojo<usize, i32> = Gojo::default();
 
         // Act
         gojo.insert(2, 2);
