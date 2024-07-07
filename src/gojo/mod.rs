@@ -581,7 +581,7 @@ pub struct Gojo<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> {
     root: NodePtr<K, V>,
     len: usize,
     curr_version: usize,
-    roots: Vec<NodePtr<K, V>>,
+    roots: Vec<(NodePtr<K, V>, usize)>,
     nil: NodePtr<K, V>,
 }
 
@@ -640,7 +640,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
             (*(nil.pointer)).color = Color::Black;
         }
         let mut roots = Vec::with_capacity(predected_amount_of_ops);
-        roots.push(nil);
+        roots.push((nil, 0));
         Gojo {
             root: NodePtr::null(),
             len: 0,
@@ -651,8 +651,13 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
     }
 
     /// Returns the len of `RBTree`.
-    pub fn len(&self) -> usize {
-        self.len
+    pub fn len(&self, version: usize) -> Option<usize> {
+        if version > self.latest_version() {
+            return None;
+        }
+
+        let (_, length) = self.roots[version];
+        Some(length)
     }
 
     /// Return the current version
@@ -824,9 +829,10 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
 
     pub fn insert(&mut self, k: K, v: V) {
         self.len += 1;
+        let new_length = self.len;
         let node = NodePtr::new(k, v);
         let mut y = NodePtr::null();
-        let mut x = self.roots[self.curr_version];
+        let mut x = self.roots[self.curr_version].0;
         self.curr_version += 1;
 
         unsafe {
@@ -871,7 +877,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
             self.insert_fixup(node);
         }
 
-        self.roots.push(self.root);
+        self.roots.push((self.root, new_length));
     }
 
     fn find_node(&self, k: &K, version: usize) -> NodePtr<K, V> {
@@ -879,7 +885,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
             return NodePtr::null();
         }
 
-        let root = self.roots[version];
+        let root = self.roots[version].0;
         let mut temp = root;
         unsafe {
             loop {
@@ -945,12 +951,13 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         }
 
         self.len -= 1;
+        let new_length = self.len;
         self.curr_version += 1;
-        self.roots.push(self.root);
+        self.roots.push((self.root, new_length));
 
         let key = unsafe { Some(self.delete(node).1) };
         self.root = self.root.get_latest_copy_for_version(self.curr_version);
-        self.roots[self.curr_version] = self.root.get_latest_copy_for_version(self.curr_version);
+        self.roots[self.curr_version].0 = self.root.get_latest_copy_for_version(self.curr_version);
         key
     }
 
@@ -1106,7 +1113,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         if version > self.latest_version() {
             anyhow::bail!(GojoError::UnknownVersion(format!("{version}")));
         }
-        let root = self.roots[version];
+        let root = self.roots[version].0;
         Ok(GojoIter {
             head: self.first_child(root, version),
             tail: self.last_child(root, version),
@@ -1536,7 +1543,7 @@ mod tree_tests {
 
         // Assert
         assert_eq!(res, Some(10 << 2));
-        assert_eq!(m.len(), 9);
+        assert_eq!(Some(9), m.len(11));
         assert!(m.get(&10, 10).is_some());
         assert_eq!(m.latest_version(), 11);
         assert!(m.get(&10, 11).is_none());
@@ -1557,7 +1564,7 @@ mod tree_tests {
         // Assert
         assert_eq!(res, Some(9 << 2));
         assert_eq!(m.get(&9, 10), Some(&(9 << 2)));
-        assert_eq!(9, m.len());
+        assert_eq!(Some(9), m.len(11));
         assert_eq!(11, m.latest_version());
         assert!(m.find_node(&9, m.latest_version()).is_null());
     }
@@ -1572,7 +1579,7 @@ mod tree_tests {
 
         // Assert
         assert_eq!(None, res);
-        assert_eq!(0, m.len());
+        assert_eq!(Some(0), m.len(0));
         assert_eq!(0, m.latest_version());
     }
 
@@ -1775,7 +1782,7 @@ mod tree_tests {
 
         // Assert
         for version in 1..=10 {
-            assert_eq!(version, gojo.len());
+            assert_eq!(Some(version), gojo.len(version));
         }
     }
 
