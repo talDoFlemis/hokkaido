@@ -17,12 +17,14 @@ const DEFAULT_MAX_OPS: usize = 100;
 pub enum GojoError {
     #[error("the version `{0}` is not available")]
     UnknownVersion(String),
+    #[error("cannot convert null node to NodeInfo")]
+    ForbiddenConvertionToNodeInfo,
     #[error("unknown gojo error")]
     Unknown,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-enum Color {
+pub enum Color {
     #[default]
     Red,
     Black,
@@ -144,7 +146,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> Default for GojoNode<K, V> {
     }
 }
 
-struct NodePtr<K: Ord + Clone + Default, V: Clone + Default> {
+pub struct NodePtr<K: Ord + Clone + Default, V: Clone + Default> {
     pointer: *mut GojoNode<K, V>,
     null: bool,
 }
@@ -287,7 +289,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         caba
     }
 
-    fn get_color(&self, version: usize) -> Color {
+    pub fn get_color(&self, version: usize) -> Color {
         if self.is_null() {
             return Color::Black;
         }
@@ -533,6 +535,154 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct NodeInfo<K: Ord + Default + Clone, V: Default + Clone> {
+    pub depth: usize,
+    pub node_ptr: NodePtr<K, V>,
+    pub color: Color,
+    pub key: K,
+    pub value: V,
+}
+
+impl<K: Ord + Clone + Default, V: Clone + Default> NodeInfo<K, V> {
+    #[allow(unused)]
+    fn new(depth: usize, key: K, value: V, color: Color) -> NodeInfo<K, V> {
+        let node_ptr = NodePtr::null();
+        Self {
+            depth,
+            node_ptr,
+            color,
+            key,
+            value,
+        }
+    }
+
+    fn from_node_ptr(node_ptr: NodePtr<K, V>, depth: usize, version: usize) -> NodeInfo<K, V> {
+        unsafe {
+            let key = (*node_ptr.pointer).key.clone();
+            let value = (*node_ptr.pointer).value.clone();
+            let color = node_ptr.get_color(version);
+            Self {
+                depth,
+                node_ptr,
+                color,
+                key,
+                value,
+            }
+        }
+    }
+
+    fn successor(&mut self, version: usize) -> Option<NodeInfo<K, V>> {
+        let mut x = self.node_ptr;
+        if !self.node_ptr.right(version).is_null() {
+            x = self.node_ptr.right(version);
+            self.depth += 1;
+            while !x.left(version).is_null() {
+                x = x.left(version);
+                self.depth += 1;
+            }
+            return Some(NodeInfo::from_node_ptr(x, self.depth, version));
+        }
+
+        let mut y = x.parent(version);
+        while !y.is_null() && x.is_right_child(version) {
+            x = y;
+            y = x.parent(version);
+            self.depth -= 1;
+        }
+
+        if y.is_null() {
+            return None;
+        }
+
+        self.depth -= 1;
+        Some(NodeInfo::from_node_ptr(y, self.depth, version))
+    }
+
+    fn first_child(root: NodePtr<K, V>, version: usize) -> NodeInfo<K, V> {
+        let mut depth = 0;
+        if root.is_null() {
+            return NodeInfo::from_node_ptr(NodePtr::null(), depth, version);
+        }
+        let mut temp = root;
+        while !temp.left(version).is_null() {
+            temp = temp.left(version);
+            depth += 1;
+        }
+        NodeInfo::from_node_ptr(temp, depth, version)
+    }
+
+    fn last_child(root: NodePtr<K, V>, version: usize) -> NodeInfo<K, V> {
+        let mut depth = 0;
+        if root.is_null() {
+            return NodeInfo::from_node_ptr(NodePtr::null(), depth, version);
+        }
+
+        let mut temp = root;
+        while !temp.right(version).is_null() {
+            temp = temp.right(version);
+            depth += 1;
+        }
+        NodeInfo::from_node_ptr(temp, depth, version)
+    }
+
+    fn is_null(&self) -> bool {
+        self.node_ptr.is_null()
+    }
+
+    fn next(&mut self, version: usize) -> Option<NodeInfo<K, V>> {
+        self.successor(version)
+    }
+}
+
+pub struct NodeInfoIter<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> {
+    head: NodeInfo<K, V>,
+    tail: NodeInfo<K, V>,
+    len: usize,
+    version: usize,
+    _marker: marker::PhantomData<&'a ()>,
+}
+
+impl<'a, K: Ord + Clone + Default + 'a, V: Default + Clone + 'a> Clone for NodeInfoIter<'a, K, V> {
+    fn clone(&self) -> NodeInfoIter<'a, K, V> {
+        NodeInfoIter {
+            head: self.head.clone(),
+            tail: self.tail.clone(),
+            len: self.len,
+            version: self.version,
+            _marker: self._marker,
+        }
+    }
+}
+
+impl<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> Iterator
+    for NodeInfoIter<'a, K, V>
+{
+    type Item = NodeInfo<K, V>;
+
+    fn next(&mut self) -> Option<NodeInfo<K, V>> {
+        if self.len == 0 {
+            return None;
+        }
+
+        if self.head.is_null() {
+            return None;
+        }
+
+        let info = self.head.clone();
+        match self.head.next(self.version) {
+            None => return None,
+            Some(v) => self.head = v,
+        }
+        self.len -= 1;
+        Some(info)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+}
+
 pub struct GojoIter<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> {
     head: NodePtr<K, V>,
     tail: NodePtr<K, V>,
@@ -621,7 +771,7 @@ where
     K: Ord + Clone + Default + Debug,
     V: Clone + Default + Debug,
 {
-    fn print_in_order(node: NodePtr<K, V>, version: usize) {
+    pub fn print_in_order(node: NodePtr<K, V>, version: usize) {
         if node.is_null() {
             return;
         }
@@ -1085,7 +1235,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         (key, value)
     }
 
-    fn first_child(&self, root: NodePtr<K,V>, version: usize) -> NodePtr<K, V> {
+    fn first_child(&self, root: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
         if root.is_null() {
             NodePtr::null()
         } else {
@@ -1114,10 +1264,26 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
             anyhow::bail!(GojoError::UnknownVersion(format!("{version}")));
         }
         let root = self.roots[version].0;
+        let len = self.roots[version].1;
         Ok(GojoIter {
             head: self.first_child(root, version),
             tail: self.last_child(root, version),
-            len: self.len,
+            len,
+            version,
+            _marker: marker::PhantomData,
+        })
+    }
+
+    pub fn node_info_iter(&self, version: usize) -> Result<NodeInfoIter<K, V>> {
+        if version > self.latest_version() {
+            anyhow::bail!(GojoError::UnknownVersion(format!("{version}")));
+        }
+        let root = self.roots[version].0;
+        let len = self.roots[version].1;
+        Ok(NodeInfoIter {
+            head: NodeInfo::first_child(root, version),
+            tail: NodeInfo::last_child(root, version),
+            len,
             version,
             _marker: marker::PhantomData,
         })
@@ -1128,7 +1294,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
 mod tree_tests {
     use pretty_assertions::assert_eq;
 
-    use crate::gojo::{Color, Mod, ModData, NodePtr};
+    use crate::gojo::{Color, Mod, ModData, NodeInfo, NodePtr};
 
     use super::{Gojo, GojoNode};
     use anyhow::Result;
@@ -1770,7 +1936,6 @@ mod tree_tests {
     }
 
     #[test]
-    #[ignore]
     fn test_len() {
         // Arrange
         let mut gojo: Gojo<usize, usize> = Gojo::default();
@@ -1835,5 +2000,42 @@ mod tree_tests {
 
         //Assert
         assert!(iter_to_version_77.is_err());
+    }
+
+    #[test]
+    fn test_node_info_iterator() -> Result<()> {
+        // Arrange
+        let mut gojo: Gojo<usize, usize> = Gojo::default();
+        let expected_cabas = [
+            NodeInfo::new(2, 1, 1 << 1, Color::Black),
+            NodeInfo::new(1, 2, 2 << 1, Color::Black),
+            NodeInfo::new(2, 3, 3 << 1, Color::Black),
+            NodeInfo::new(0, 4, 4 << 1, Color::Black),
+            NodeInfo::new(2, 5, 5 << 1, Color::Black),
+            NodeInfo::new(1, 6, 6 << 1, Color::Black),
+            NodeInfo::new(3, 7, 7 << 1, Color::Black),
+            NodeInfo::new(2, 8, 8 << 1, Color::Red),
+            NodeInfo::new(3, 9, 9 << 1, Color::Black),
+            NodeInfo::new(4, 10, 10 << 1, Color::Red),
+        ];
+
+        // Act
+        for key in 1..=10 {
+            gojo.insert(key, key << 1);
+        }
+        Gojo::print_in_order(gojo.root, 10);
+        println!("root is {:?}", gojo.root);
+        let iterator = gojo.node_info_iter(10)?;
+
+        // Assert
+        for (index, info) in iterator.enumerate() {
+            let expected = &expected_cabas[index];
+            assert_eq!(expected.key, info.key);
+            assert_eq!(expected.value, info.value);
+            assert_eq!(expected.color, info.color);
+            assert_eq!(expected.depth, info.depth);
+        }
+
+        Ok(())
     }
 }
