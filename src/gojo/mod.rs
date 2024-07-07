@@ -214,7 +214,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> PartialOrd for NodePtr<K, V> 
 
 impl<K: Ord + Clone + Default, V: Clone + Default> PartialEq for NodePtr<K, V> {
     fn eq(&self, other: &NodePtr<K, V>) -> bool {
-        unsafe { (*self.pointer).key == (*other.pointer).key }
+        self.pointer == other.pointer
     }
 }
 
@@ -380,28 +380,25 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         match mod_data {
             ModData::Parent(p) => {
                 (*new_node_ptr.pointer).parent = p;
-                (*new_node_ptr.pointer).bk_ptr_parent = p;
             }
             ModData::Left(l) => {
                 (*new_node_ptr.pointer).left = l;
-                (*new_node_ptr.pointer).bk_ptr_left = l
             }
             ModData::Right(r) => {
                 (*new_node_ptr.pointer).right = r;
-                (*new_node_ptr.pointer).bk_ptr_right = r
             }
             ModData::Col(c) => (*new_node_ptr.pointer).color = c,
         }
 
         // Update left back pontairos
-        let mut bk_ptr_left = (*new_node_ptr.pointer).bk_ptr_left;
-        if !bk_ptr_left.is_null() {
+        let mut bk_ptr_left = (*self.pointer).bk_ptr_left;
+        if !bk_ptr_left.is_null() && bk_ptr_left.parent(version) == *self {
             bk_ptr_left.set_parent(new_node_ptr, version);
         }
 
         // Update right back pontairos
-        let mut bk_ptr_right = (*new_node_ptr.pointer).bk_ptr_right;
-        if !bk_ptr_right.is_null() {
+        let mut bk_ptr_right = (*self.pointer).bk_ptr_right;
+        if !bk_ptr_right.is_null() && bk_ptr_right.parent(version) == *self {
             bk_ptr_right.set_parent(new_node_ptr, version);
         }
 
@@ -412,7 +409,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
 
         // Update parent back pontairos that can have a new root
-        if new_node_ptr.is_left_child(version) {
+        if *self == bk_ptr_parent.left(version) {
             bk_ptr_parent.set_left(new_node_ptr, version);
         } else {
             bk_ptr_parent.set_right(new_node_ptr, version);
@@ -1610,27 +1607,31 @@ mod tree_tests {
     fn test_insert_increasing() {
         // Arrange
         let mut m = Gojo::default();
-        let maximum = 10;
-
-        // Act
-        for key in 1..=maximum {
-            m.insert(key, key << 2);
-        }
-
-        // Assert
-        assert_eq!(unsafe { (*m.root.pointer).key }, 4);
         let expected = [
             (1, Color::Black),
             (2, Color::Black),
             (3, Color::Black),
             (4, Color::Black),
             (5, Color::Black),
-            (6, Color::Black),
+            (6, Color::Red),
             (7, Color::Black),
-            (8, Color::Red),
+            (8, Color::Black),
             (9, Color::Black),
             (10, Color::Red),
+            (11, Color::Red),
+            (12, Color::Red),
         ];
+        let maximum = expected.len();
+
+        // Act
+        for key in 1..=maximum {
+            m.insert(key, key << 2);
+        }
+
+        Gojo::print_in_order(m.root, maximum);
+
+        // Assert
+        assert_eq!(unsafe { (*m.root.pointer).key }, 4);
         for (key, color) in expected.iter() {
             let ptr = m.find_node(key, maximum);
             assert!(!ptr.is_null());
@@ -2024,7 +2025,6 @@ mod tree_tests {
             gojo.insert(key, key << 1);
         }
         Gojo::print_in_order(gojo.root, 10);
-        println!("root is {:?}", gojo.root);
         let iterator = gojo.node_info_iter(10)?;
 
         // Assert
