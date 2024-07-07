@@ -9,6 +9,7 @@ authors = ["Said Rodrigues <coderflemis@gmail.com>"]
 [dependencies]
 anyhow = "1.0.86"
 clap = { version = "4.5.8", features = ["derive"] }
+thiserror = "1.0.61"
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"
