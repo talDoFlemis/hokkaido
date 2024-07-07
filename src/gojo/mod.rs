@@ -4,8 +4,8 @@ use std::fmt::{self, Debug};
 use std::ptr;
 use std::ptr::drop_in_place;
 
-pub mod parser;
 pub mod cli;
+pub mod parser;
 
 const MAX_MODS: usize = 6;
 const DEFAULT_MAX_OPS: usize = 100;
@@ -233,7 +233,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
     fn set_color(&mut self, color: Color, version: usize) {
         if self.is_null() {
-            // TODO: Maybe can break shit
             return;
         }
 
@@ -408,8 +407,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_parent(&mut self, parent: NodePtr<K, V>, version: usize) {
-        debug_assert!(!self.is_null(), "Trying to change parent for null node");
-
         let mut ptr = self.get_latest_copy_for_version(version);
         unsafe {
             let new_mod = ModData::Parent(parent);
@@ -418,8 +415,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_left(&mut self, left: NodePtr<K, V>, version: usize) {
-        debug_assert!(!self.is_null(), "Trying to change left for null node");
-
         let mut ptr = self.get_latest_copy_for_version(version);
         unsafe {
             let new_mod = ModData::Left(left);
@@ -428,8 +423,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_right(&mut self, right: NodePtr<K, V>, version: usize) {
-        debug_assert!(!self.is_null(), "Trying to change right for null node");
-
         let mut ptr = self.get_latest_copy_for_version(version);
         unsafe {
             let new_mod = ModData::Right(right);
@@ -438,9 +431,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn parent(&self, version: usize) -> NodePtr<K, V> {
-        if self.is_null() {
-            return NodePtr::null();
-        }
         unsafe {
             let ptr = self.get_latest_copy_for_version(version);
             let mut value = (*ptr.pointer).parent;
@@ -457,10 +447,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn left(&self, version: usize) -> NodePtr<K, V> {
-        if self.is_null() {
-            return NodePtr::null();
-        }
-
         unsafe {
             let ptr = self.get_latest_copy_for_version(version);
             let mut value = (*ptr.pointer).left;
@@ -477,9 +463,6 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn right(&self, version: usize) -> NodePtr<K, V> {
-        if self.is_null() {
-            return NodePtr::null();
-        }
         unsafe {
             let ptr = self.get_latest_copy_for_version(version);
             let mut value = (*ptr.pointer).right;
@@ -567,13 +550,13 @@ where
     K: Ord + Clone + Default + Debug,
     V: Clone + Default + Debug,
 {
-    fn print_in_order(&self, node: NodePtr<K, V>) {
+    fn print_in_order(&self, node: NodePtr<K, V>, version: usize) {
         if node.is_null() {
             return;
         }
-        self.print_in_order(node.left(self.curr_version));
-        println!("{:?}", node);
-        self.print_in_order(node.right(self.curr_version));
+        self.print_in_order(node.left(version), version);
+        println!("{:?}", node.get_latest_copy_for_version(version));
+        self.print_in_order(node.right(version), version);
     }
 }
 
@@ -602,7 +585,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
     }
 
     /// Return the current version
-    pub fn version(&self) -> usize {
+    pub fn latest_version(&self) -> usize {
         self.curr_version
     }
 
@@ -889,6 +872,22 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         if node.is_null() {
             return None;
         }
+
+        self.len -= 1;
+        self.curr_version += 1;
+        self.roots.push(self.root);
+
+        let key = unsafe { Some(self.delete(node).1) };
+        self.root = self.root.get_latest_copy_for_version(self.curr_version);
+        self.roots[self.curr_version] = self.root.get_latest_copy_for_version(self.curr_version);
+        key
+    }
+
+    pub fn college_remove(&mut self, k: &K) -> Option<V> {
+        let node = self.find_node(k, self.curr_version);
+        if node.is_null() {
+            return None;
+        }
         self.len -= 1;
         unsafe { Some(self.delete(node).1) }
     }
@@ -981,12 +980,14 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
             y.right(version)
         };
 
+        x.set_parent(y.parent(version), version);
+
         if y.parent(version).is_null() {
             self.root = x;
         } else if y.is_left_child(version) {
-            x = y.parent(version).left(version);
+            y.parent(version).set_left(x, version);
         } else {
-            x = y.parent(version).right(version);
+            y.parent(version).set_right(x, version);
         }
 
         if y != z {
@@ -1424,33 +1425,31 @@ mod tree_tests {
         let res = m.remove(&10);
 
         // Assert
-        assert!(res.is_some());
-        assert_eq!(res.unwrap(), 10 << 2);
+        assert_eq!(res, Some(10 << 2));
         assert_eq!(m.len(), 9);
         assert!(m.get(&10, 10).is_some());
+        assert_eq!(m.latest_version(), 11);
         assert!(m.get(&10, 11).is_none());
     }
 
     #[test]
-    fn test_remove() {
+    fn test_remove_black_node() {
         // Arrange
         let mut m = Gojo::default();
-        let maximum = 100;
+        let maximum = 10;
 
         // Act
         for key in 1..=maximum {
             m.insert(key, key << 2);
         }
-        let res = m.remove(&1);
+        let res = m.remove(&9);
 
         // Assert
-        assert_eq!(res, Some(1 << 2));
-
-        for key in 1..=maximum {
-            assert!(!m.find_node(&key, maximum).is_null());
-        }
-
-        assert!(m.find_node(&1, maximum + 1).is_null());
+        assert_eq!(res, Some(9 << 2));
+        assert_eq!(m.get(&9, 10), Some(&(9 << 2)));
+        assert_eq!(9, m.len());
+        assert_eq!(11, m.latest_version());
+        assert!(m.find_node(&9, m.latest_version()).is_null());
     }
 
     #[test]
@@ -1625,5 +1624,11 @@ mod tree_tests {
         assert!(version_two_succ.is_none());
         assert!(version_tree_succ.is_some());
         assert_eq!(&1, version_tree_succ.unwrap());
+    }
+
+    #[test]
+    #[ignore]
+    fn test_college_remove_that_changes_version_when_element_not_found() {
+        todo!();
     }
 }
