@@ -1,14 +1,25 @@
+use anyhow::Result;
 use std::cmp::Ord;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug};
+use std::marker;
 use std::ptr;
 use std::ptr::drop_in_place;
+use thiserror::Error;
 
 pub mod cli;
 pub mod parser;
 
 const MAX_MODS: usize = 6;
 const DEFAULT_MAX_OPS: usize = 100;
+
+#[derive(Error, Debug)]
+pub enum GojoError {
+    #[error("the version `{0}` is not available")]
+    UnknownVersion(String),
+    #[error("unknown gojo error")]
+    Unknown,
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 enum Color {
@@ -488,6 +499,23 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     fn is_null(&self) -> bool {
         self.null
     }
+
+    fn next(self, version: usize) -> NodePtr<K, V> {
+        if !self.right(version).is_null() {
+            self.right(version).min_node(version)
+        } else {
+            let mut temp = self;
+            loop {
+                if temp.parent(version).is_null() {
+                    return NodePtr::null();
+                }
+                if temp.is_left_child(version) {
+                    return temp.parent(version);
+                }
+                temp = temp.parent(version);
+            }
+        }
+    }
 }
 
 impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
@@ -502,6 +530,49 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
             node.right(version).set_parent(node, version);
         }
         node
+    }
+}
+
+pub struct GojoIter<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> {
+    head: NodePtr<K, V>,
+    tail: NodePtr<K, V>,
+    len: usize,
+    version: usize,
+    _marker: marker::PhantomData<&'a ()>,
+}
+
+impl<'a, K: Ord + Clone + Default + 'a, V: Default + Clone + 'a> Clone for GojoIter<'a, K, V> {
+    fn clone(&self) -> GojoIter<'a, K, V> {
+        GojoIter {
+            head: self.head,
+            tail: self.tail,
+            len: self.len,
+            version: self.version,
+            _marker: self._marker,
+        }
+    }
+}
+
+impl<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> Iterator for GojoIter<'a, K, V> {
+    type Item = (&'a K, &'a V);
+
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
+        if self.len == 0 {
+            return None;
+        }
+
+        if self.head.is_null() {
+            return None;
+        }
+
+        let (k, v) = unsafe { (&(*self.head.pointer).key, &(*self.head.pointer).value) };
+        self.head = self.head.next(self.version);
+        self.len -= 1;
+        Some((k, v))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
     }
 }
 
@@ -550,13 +621,13 @@ where
     K: Ord + Clone + Default + Debug,
     V: Clone + Default + Debug,
 {
-    fn print_in_order(&self, node: NodePtr<K, V>, version: usize) {
+    fn print_in_order(node: NodePtr<K, V>, version: usize) {
         if node.is_null() {
             return;
         }
-        self.print_in_order(node.left(version), version);
+        Self::print_in_order(node.left(version), version);
         println!("{:?}", node.get_latest_copy_for_version(version));
-        self.print_in_order(node.right(version), version);
+        Self::print_in_order(node.right(version), version);
     }
 }
 
@@ -1006,6 +1077,44 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         }
         (key, value)
     }
+
+    fn first_child(&self, root: NodePtr<K,V>, version: usize) -> NodePtr<K, V> {
+        if root.is_null() {
+            NodePtr::null()
+        } else {
+            let mut temp = root;
+            while !temp.left(version).is_null() {
+                temp = temp.left(version);
+            }
+            temp
+        }
+    }
+
+    fn last_child(&self, root: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
+        if root.is_null() {
+            NodePtr::null()
+        } else {
+            let mut temp = root;
+            while !temp.right(version).is_null() {
+                temp = temp.right(version);
+            }
+            temp
+        }
+    }
+
+    pub fn iter(&self, version: usize) -> Result<GojoIter<K, V>> {
+        if version > self.latest_version() {
+            anyhow::bail!(GojoError::UnknownVersion(format!("{version}")));
+        }
+        let root = self.roots[version];
+        Ok(GojoIter {
+            head: self.first_child(root, version),
+            tail: self.last_child(root, version),
+            len: self.len,
+            version,
+            _marker: marker::PhantomData,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1015,6 +1124,7 @@ mod tree_tests {
     use crate::gojo::{Color, Mod, ModData, NodePtr};
 
     use super::{Gojo, GojoNode};
+    use anyhow::Result;
 
     #[test]
     fn test_get_color_without_mods() {
@@ -1462,6 +1572,8 @@ mod tree_tests {
 
         // Assert
         assert_eq!(None, res);
+        assert_eq!(0, m.len());
+        assert_eq!(0, m.latest_version());
     }
 
     #[test]
@@ -1627,8 +1739,94 @@ mod tree_tests {
     }
 
     #[test]
+    fn test_multiple_inserts_and_deletions() {
+        // Arrange
+        let mut gojo: Gojo<usize, usize> = Gojo::default();
+
+        // Act
+        for key in 1..=10 {
+            gojo.insert(key, key);
+        }
+
+        for key in 1..=10 {
+            gojo.remove(&key);
+        }
+
+        // Assert
+        for key in 1..=10 {
+            assert!(gojo.get(&key, 10).is_some());
+        }
+
+        for key in 1..=10 {
+            assert!(gojo.get(&key, 20).is_none());
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_len() {
+        // Arrange
+        let mut gojo: Gojo<usize, usize> = Gojo::default();
+
+        // Act
+        for key in 1..=10 {
+            gojo.insert(key, key);
+        }
+
+        // Assert
+        for version in 1..=10 {
+            assert_eq!(version, gojo.len());
+        }
+    }
+
+    #[test]
     #[ignore]
     fn test_college_remove_that_changes_version_when_element_not_found() {
         todo!();
+    }
+
+    #[test]
+    fn test_gojo_iterator() -> Result<()> {
+        // Arrange
+        let mut gojo: Gojo<usize, usize> = Gojo::default();
+
+        // Act
+        for i in 1..=10 {
+            gojo.insert(i, i << 1);
+        }
+        let iter_to_version_five = gojo.iter(5)?;
+        let iter_to_version_ten = gojo.iter(10)?;
+
+        //Assert
+        let mut counter = 0;
+        for (k, v) in iter_to_version_five {
+            assert_eq!(*v, *k << 1);
+            counter += 1;
+        }
+        assert_eq!(5, counter);
+
+        counter = 0;
+        for (k, v) in iter_to_version_ten {
+            assert_eq!(*v, *k << 1);
+            counter += 1;
+        }
+        assert_eq!(10, counter);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_gojo_iterator_with_unknown_version() {
+        // Arrange
+        let mut gojo: Gojo<usize, usize> = Gojo::default();
+
+        // Act
+        for i in 1..=10 {
+            gojo.insert(i, i << 1);
+        }
+        let iter_to_version_77 = gojo.iter(77);
+
+        //Assert
+        assert!(iter_to_version_77.is_err());
     }
 }
