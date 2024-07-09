@@ -113,7 +113,11 @@ fn main() -> Result<()> {
     let parser = parser::ParserVagaba::default();
     let stms = parser.parse_lines(&buf)?;
 
-    let output_string = process_statements(stms)?;
+    let mut output_string = process_statements(stms)?;
+
+    if cli.new_line {
+        output_string.push('\n');
+    }
     writer.write_all(output_string.as_bytes())?;
 
     Ok(())

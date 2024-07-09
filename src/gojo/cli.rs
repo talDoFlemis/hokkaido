@@ -12,4 +12,8 @@ pub struct Cli {
     /// Name of output file to write
     #[arg(short, long, value_name = "OUTPUT_FILE")]
     pub output: Option<PathBuf>,
+
+    /// Trailing newline
+    #[arg(short, long)]
+    pub new_line: bool,
 }
