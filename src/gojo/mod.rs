@@ -249,7 +249,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
             return;
         }
 
-        let mut ptr = self.get_latest_copy_for_version(version);
+        let mut ptr = self.get_last_copy(version);
 
         let curr_color = ptr.get_color(version);
         if color == curr_color {
@@ -279,7 +279,10 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         (*self.pointer).next_copy
     }
 
-    fn get_latest_copy_for_version(&self, version: usize) -> NodePtr<K, V> {
+    fn get_last_copy(&self, version: usize) -> NodePtr<K, V> {
+        if self.is_null() {
+            return NodePtr::null();
+        }
         let mut caba = *self;
         unsafe {
             while !caba.get_next_copy().is_null() && caba.get_next_copy().version() <= version {
@@ -294,7 +297,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
             return Color::Black;
         }
         unsafe {
-            let ptr = self.get_latest_copy_for_version(version);
+            let ptr = self.get_last_copy(version);
             let mut value = (*ptr.pointer).color;
             for m in (*ptr.pointer).mods.iter() {
                 if m.version > version {
@@ -392,13 +395,17 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
         // Update left back pontairos
         let mut bk_ptr_left = (*self.pointer).bk_ptr_left;
-        if !bk_ptr_left.is_null() && bk_ptr_left.parent(version) == *self {
+        if !bk_ptr_left.is_null()
+            && (*bk_ptr_left.parent(version).left(version).pointer).key == (*self.pointer).key
+        {
             bk_ptr_left.set_parent(new_node_ptr, version);
         }
 
         // Update right back pontairos
         let mut bk_ptr_right = (*self.pointer).bk_ptr_right;
-        if !bk_ptr_right.is_null() && bk_ptr_right.parent(version) == *self {
+        if !bk_ptr_right.is_null()
+            && (*bk_ptr_left.parent(version).right(version).pointer).key == (*self.pointer).key
+        {
             bk_ptr_right.set_parent(new_node_ptr, version);
         }
 
@@ -409,7 +416,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
 
         // Update parent back pontairos that can have a new root
-        if *self == bk_ptr_parent.left(version) {
+        if (*bk_ptr_parent.left(version).pointer).key == (*self.pointer).key {
             bk_ptr_parent.set_left(new_node_ptr, version);
         } else {
             bk_ptr_parent.set_right(new_node_ptr, version);
@@ -417,7 +424,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_parent(&mut self, parent: NodePtr<K, V>, version: usize) {
-        let mut ptr = self.get_latest_copy_for_version(version);
+        let mut ptr = self.get_last_copy(version);
         unsafe {
             let new_mod = ModData::Parent(parent);
             ptr.set_modification(new_mod, version);
@@ -425,7 +432,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_left(&mut self, left: NodePtr<K, V>, version: usize) {
-        let mut ptr = self.get_latest_copy_for_version(version);
+        let mut ptr = self.get_last_copy(version);
         unsafe {
             let new_mod = ModData::Left(left);
             ptr.set_modification(new_mod, version);
@@ -433,7 +440,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn set_right(&mut self, right: NodePtr<K, V>, version: usize) {
-        let mut ptr = self.get_latest_copy_for_version(version);
+        let mut ptr = self.get_last_copy(version);
         unsafe {
             let new_mod = ModData::Right(right);
             ptr.set_modification(new_mod, version);
@@ -441,8 +448,11 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn parent(&self, version: usize) -> NodePtr<K, V> {
+        if self.is_null() {
+            return NodePtr::null();
+        }
         unsafe {
-            let ptr = self.get_latest_copy_for_version(version);
+            let ptr = self.get_last_copy(version);
             let mut value = (*ptr.pointer).parent;
             for m in (*ptr.pointer).mods.iter() {
                 if m.version > version {
@@ -457,8 +467,11 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn left(&self, version: usize) -> NodePtr<K, V> {
+        if self.is_null() {
+            return NodePtr::null();
+        }
         unsafe {
-            let ptr = self.get_latest_copy_for_version(version);
+            let ptr = self.get_last_copy(version);
             let mut value = (*ptr.pointer).left;
             for m in (*ptr.pointer).mods.iter() {
                 if m.version > version {
@@ -473,8 +486,11 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn right(&self, version: usize) -> NodePtr<K, V> {
+        if self.is_null() {
+            return NodePtr::null();
+        }
         unsafe {
-            let ptr = self.get_latest_copy_for_version(version);
+            let ptr = self.get_last_copy(version);
             let mut value = (*ptr.pointer).right;
             for m in (*ptr.pointer).mods.iter() {
                 if m.version > version {
@@ -780,7 +796,7 @@ where
             return;
         }
         Self::print_in_order(node.left(version), version);
-        println!("{:?}", node.get_latest_copy_for_version(version));
+        println!("{:?}", node.get_last_copy(version));
         Self::print_in_order(node.right(version), version);
     }
 }
@@ -792,6 +808,9 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         nil.null = true;
         unsafe {
             (*(nil.pointer)).color = Color::Black;
+            (*(nil.pointer)).next_copy = nil;
+            (*(nil.pointer)).left = nil;
+            (*(nil.pointer)).right = nil;
         }
         let mut roots = Vec::with_capacity(predected_amount_of_ops);
         roots.push((nil, 0));
@@ -881,8 +900,8 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
     }
 
     unsafe fn left_rotate(&mut self, node: NodePtr<K, V>) {
-        let mut caba = node;
         let version = self.curr_version;
+        let mut caba = node.get_last_copy(version);
         let mut temp = caba.right(version);
         caba.set_right(temp.left(version), version);
 
@@ -976,7 +995,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
                 self.left_rotate(dude.parent(version).parent(version));
             }
         }
-        let mut possible_new_root = self.root.get_latest_copy_for_version(version);
+        let mut possible_new_root = self.root.get_last_copy(version);
         possible_new_root.set_black_color(version);
         self.root = possible_new_root;
     }
@@ -1110,8 +1129,8 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         self.roots.push((self.root, new_length));
 
         let key = unsafe { Some(self.delete(node).1) };
-        self.root = self.root.get_latest_copy_for_version(self.curr_version);
-        self.roots[self.curr_version].0 = self.root.get_latest_copy_for_version(self.curr_version);
+        self.root = self.root.get_last_copy(self.curr_version);
+        self.roots[self.curr_version].0 = self.root.get_last_copy(self.curr_version);
         key
     }
 
@@ -1628,7 +1647,7 @@ mod tree_tests {
             (8, Color::Black),
             (9, Color::Black),
             (10, Color::Red),
-            (11, Color::Red),
+            (11, Color::Black),
             (12, Color::Red),
         ];
         let maximum = expected.len();
@@ -1637,8 +1656,6 @@ mod tree_tests {
         for key in 1..=maximum {
             m.insert(key, key << 2);
         }
-
-        Gojo::print_in_order(m.root, maximum);
 
         // Assert
         assert_eq!(unsafe { (*m.root.pointer).key }, 4);
