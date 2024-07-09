@@ -533,7 +533,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 }
 
 #[derive(Clone, Debug)]
-pub struct NodeInfo<K: Ord + Default + Clone, V: Default + Clone> {
+pub struct NodeInfo<K: Ord + Default + Clone + Debug, V: Default + Clone + Debug> {
     pub depth: usize,
     pub node_ptr: NodePtr<K, V>,
     pub color: Color,
@@ -541,7 +541,11 @@ pub struct NodeInfo<K: Ord + Default + Clone, V: Default + Clone> {
     pub value: V,
 }
 
-impl<K: Ord + Clone + Default, V: Clone + Default> NodeInfo<K, V> {
+impl<K, V> NodeInfo<K, V>
+where
+    K: Ord + Clone + Default + Debug,
+    V: Clone + Default + Debug,
+{
     #[allow(unused)]
     fn new(depth: usize, key: K, value: V, color: Color) -> NodeInfo<K, V> {
         let node_ptr = NodePtr::null();
@@ -570,30 +574,31 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodeInfo<K, V> {
     }
 
     fn successor(&mut self, version: usize) -> Option<NodeInfo<K, V>> {
+        let mut depth = self.depth;
         let mut x = self.node_ptr;
-        if !self.node_ptr.right(version).is_null() {
-            x = self.node_ptr.right(version);
-            self.depth += 1;
+        if !x.right(version).is_null() {
+            x = x.right(version);
+            depth += 1;
             while !x.left(version).is_null() {
                 x = x.left(version);
-                self.depth += 1;
+                depth += 1;
             }
-            return Some(NodeInfo::from_node_ptr(x, self.depth, version));
+            return Some(NodeInfo::from_node_ptr(x, depth, version));
         }
 
         let mut y = x.parent(version);
-        while !y.is_null() && x.is_right_child(version) {
+        while !y.is_null() && x == y.right(version) {
             x = y;
             y = x.parent(version);
-            self.depth -= 1;
+            depth -= 1;
         }
 
         if y.is_null() {
             return None;
         }
 
-        self.depth -= 1;
-        Some(NodeInfo::from_node_ptr(y, self.depth, version))
+        depth -= 1;
+        Some(NodeInfo::from_node_ptr(y, depth, version))
     }
 
     fn first_child(root: NodePtr<K, V>, version: usize) -> NodeInfo<K, V> {
@@ -632,15 +637,18 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodeInfo<K, V> {
     }
 }
 
-pub struct NodeInfoIter<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> {
-    head: NodeInfo<K, V>,
-    tail: NodeInfo<K, V>,
+pub struct NodeInfoIter<'a, K: Ord + Default + Clone + Debug + 'a, V: Default + Clone + Debug + 'a>
+{
+    head: Option<NodeInfo<K, V>>,
+    tail: Option<NodeInfo<K, V>>,
     len: usize,
     version: usize,
     _marker: marker::PhantomData<&'a ()>,
 }
 
-impl<'a, K: Ord + Clone + Default + 'a, V: Default + Clone + 'a> Clone for NodeInfoIter<'a, K, V> {
+impl<'a, K: Ord + Clone + Default + Debug + 'a, V: Default + Clone + Debug + 'a> Clone
+    for NodeInfoIter<'a, K, V>
+{
     fn clone(&self) -> NodeInfoIter<'a, K, V> {
         NodeInfoIter {
             head: self.head.clone(),
@@ -652,7 +660,7 @@ impl<'a, K: Ord + Clone + Default + 'a, V: Default + Clone + 'a> Clone for NodeI
     }
 }
 
-impl<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> Iterator
+impl<'a, K: Ord + Default + Clone + Debug + 'a, V: Default + Clone + Debug + 'a> Iterator
     for NodeInfoIter<'a, K, V>
 {
     type Item = NodeInfo<K, V>;
@@ -662,17 +670,16 @@ impl<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> Iterator
             return None;
         }
 
-        if self.head.is_null() {
-            return None;
+        self.head.as_ref()?;
+
+        if let Some(value) = &self.head {
+            let mut info = value.clone();
+            self.head = info.next(self.version);
+            self.len -= 1;
+            return Some(info);
         }
 
-        let info = self.head.clone();
-        match self.head.next(self.version) {
-            None => return None,
-            Some(v) => self.head = v,
-        }
-        self.len -= 1;
-        Some(info)
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -725,7 +732,7 @@ impl<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> Iterator for Go
 
 #[derive(Debug)]
 pub struct Gojo<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> {
-    root: NodePtr<K, V>,
+    pub root: NodePtr<K, V>,
     len: usize,
     curr_version: usize,
     roots: Vec<(NodePtr<K, V>, usize)>,
@@ -1277,9 +1284,12 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         }
         let root = self.roots[version].0;
         let len = self.roots[version].1;
+        let head = Some(NodeInfo::first_child(root, version));
+        let tail = Some(NodeInfo::last_child(root, version));
+
         Ok(NodeInfoIter {
-            head: NodeInfo::first_child(root, version),
-            tail: NodeInfo::last_child(root, version),
+            head,
+            tail,
             len,
             version,
             _marker: marker::PhantomData,
@@ -2024,16 +2034,17 @@ mod tree_tests {
         for key in 1..=10 {
             gojo.insert(key, key << 1);
         }
-        Gojo::print_in_order(gojo.root, 10);
-        let iterator = gojo.node_info_iter(10)?;
+        let mut iterator = gojo.node_info_iter(10)?;
 
         // Assert
-        for (index, info) in iterator.enumerate() {
-            let expected = &expected_cabas[index];
-            assert_eq!(expected.key, info.key);
-            assert_eq!(expected.value, info.value);
-            assert_eq!(expected.color, info.color);
-            assert_eq!(expected.depth, info.depth);
+        for expected in expected_cabas {
+            let item = iterator.next();
+            assert!(item.is_some());
+            let actual = item.unwrap();
+            assert_eq!(expected.key, actual.key);
+            assert_eq!(expected.value, actual.value);
+            assert_eq!(expected.color, actual.color);
+            assert_eq!(expected.depth, actual.depth);
         }
 
         Ok(())
