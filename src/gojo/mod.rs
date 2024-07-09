@@ -214,7 +214,12 @@ impl<K: Ord + Clone + Default, V: Clone + Default> PartialOrd for NodePtr<K, V> 
 
 impl<K: Ord + Clone + Default, V: Clone + Default> PartialEq for NodePtr<K, V> {
     fn eq(&self, other: &NodePtr<K, V>) -> bool {
-        self.pointer == other.pointer
+        unsafe {
+            if other.is_null() || self.is_null() {
+                return false;
+            }
+            (*other.pointer).key == (*self.pointer).key
+        }
     }
 }
 
@@ -332,11 +337,13 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn is_left_child(&self, version: usize) -> bool {
-        unsafe { (*self.parent(version).left(version).pointer).key == (*self.pointer).key }
+        let other = self.parent(version).left(version);
+        other == *self
     }
 
     fn is_right_child(&self, version: usize) -> bool {
-        unsafe { (*self.parent(version).right(version).pointer).key == (*self.pointer).key }
+        let other = self.parent(version).right(version);
+        other == *self
     }
 
     fn min_node(self, version: usize) -> NodePtr<K, V> {
@@ -395,17 +402,13 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
         // Update left back pontairos
         let mut bk_ptr_left = (*self.pointer).bk_ptr_left;
-        if !bk_ptr_left.is_null()
-            && (*bk_ptr_left.parent(version).left(version).pointer).key == (*self.pointer).key
-        {
+        if !bk_ptr_left.is_null() && bk_ptr_left.is_left_child(version) {
             bk_ptr_left.set_parent(new_node_ptr, version);
         }
 
         // Update right back pontairos
         let mut bk_ptr_right = (*self.pointer).bk_ptr_right;
-        if !bk_ptr_right.is_null()
-            && (*bk_ptr_left.parent(version).right(version).pointer).key == (*self.pointer).key
-        {
+        if !bk_ptr_right.is_null() && bk_ptr_right.is_right_child(version) {
             bk_ptr_right.set_parent(new_node_ptr, version);
         }
 
@@ -416,7 +419,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         }
 
         // Update parent back pontairos that can have a new root
-        if (*bk_ptr_parent.left(version).pointer).key == (*self.pointer).key {
+        if *self == bk_ptr_parent.left(version) {
             bk_ptr_parent.set_left(new_node_ptr, version);
         } else {
             bk_ptr_parent.set_right(new_node_ptr, version);
@@ -563,7 +566,7 @@ where
     V: Clone + Default + Debug,
 {
     #[allow(unused)]
-    fn new(depth: usize, key: K, value: V, color: Color) -> NodeInfo<K, V> {
+    pub fn new(depth: usize, key: K, value: V, color: Color) -> NodeInfo<K, V> {
         let node_ptr = NodePtr::null();
         Self {
             depth,
@@ -903,46 +906,52 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         let version = self.curr_version;
         let mut caba = node.get_last_copy(version);
         let mut temp = caba.right(version);
-        caba.set_right(temp.left(version), version);
+        caba.set_right(temp.left(version).get_last_copy(version), version);
 
         if !temp.left(version).is_null() {
-            temp.left(version).set_parent(caba, version);
+            temp.left(version)
+                .set_parent(caba.get_last_copy(version), version);
         }
 
-        temp.set_parent(caba.parent(version), version);
+        temp.set_parent(caba.parent(version).get_last_copy(version), version);
         if caba.parent(version).is_null() {
             self.root = temp;
         } else if caba.is_left_child(version) {
-            caba.parent(version).set_left(temp, version);
+            caba.parent(version)
+                .set_left(temp.get_last_copy(version), version);
         } else {
-            caba.parent(version).set_right(temp, version);
+            caba.parent(version)
+                .set_right(temp.get_last_copy(version), version);
         }
 
-        temp.set_left(caba, version);
-        caba.set_parent(temp, version);
+        temp.set_left(caba.get_last_copy(version), version);
+        caba.set_parent(temp.get_last_copy(version), version);
     }
 
     unsafe fn right_rotate(&mut self, node: NodePtr<K, V>) {
-        let mut caba = node;
         let version = self.curr_version;
+        let mut caba = node.get_last_copy(version);
         let mut temp = caba.left(version);
-        caba.set_left(temp.right(version), version);
+        caba.set_left(temp.right(version).get_last_copy(version), version);
 
         if !temp.right(version).is_null() {
-            temp.right(version).set_parent(caba, version);
+            temp.right(version)
+                .set_parent(caba.get_last_copy(version), version);
         }
 
-        temp.set_parent(caba.parent(version), version);
+        temp.set_parent(caba.parent(version).get_last_copy(version), version);
         if caba.parent(version).is_null() {
             self.root = temp;
         } else if caba.is_right_child(version) {
-            caba.parent(version).set_right(temp, version);
+            caba.parent(version)
+                .set_right(temp.get_last_copy(version), version);
         } else {
-            caba.parent(version).set_left(temp, version);
+            caba.parent(version)
+                .set_left(temp.get_last_copy(version), version);
         }
 
-        temp.set_right(caba, version);
-        caba.set_parent(temp, version);
+        temp.set_right(caba.get_last_copy(version), version);
+        caba.set_parent(temp.get_last_copy(version), version);
     }
 
     unsafe fn insert_fixup(&mut self, node: NodePtr<K, V>) {
