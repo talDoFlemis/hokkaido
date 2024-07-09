@@ -289,7 +289,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
     fn get_last_copy(&self, version: usize) -> NodePtr<K, V> {
         if self.is_null() {
-            return NodePtr::null();
+            return *self;
         }
         let mut caba = *self;
         unsafe {
@@ -366,6 +366,16 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     unsafe fn set_modification(&mut self, mod_data: ModData<K, V>, version: usize) {
+        if self.is_null() {
+            match mod_data {
+                ModData::Parent(p) => (*self.pointer).parent = p,
+                ModData::Left(l) => (*self.pointer).left = l,
+                ModData::Right(r) => (*self.pointer).right = r,
+                ModData::Col(c) => (*self.pointer).color = c,
+            }
+            return;
+        }
+
         if (*self.pointer).mods.len() < MAX_MODS {
             match mod_data {
                 ModData::Parent(p) => (*self.pointer).bk_ptr_parent = p,
@@ -455,7 +465,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
     fn parent(&self, version: usize) -> NodePtr<K, V> {
         if self.is_null() {
-            return NodePtr::null();
+            return *self;
         }
         unsafe {
             let ptr = self.get_last_copy(version);
@@ -474,7 +484,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
     fn left(&self, version: usize) -> NodePtr<K, V> {
         if self.is_null() {
-            return NodePtr::null();
+            return *self;
         }
         unsafe {
             let ptr = self.get_last_copy(version);
@@ -493,7 +503,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
     fn right(&self, version: usize) -> NodePtr<K, V> {
         if self.is_null() {
-            return NodePtr::null();
+            return *self;
         }
         unsafe {
             let ptr = self.get_last_copy(version);
@@ -934,19 +944,16 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         caba.set_left(temp.right(version), version);
 
         if !temp.right(version).is_null() {
-            temp.right(version)
-                .set_parent(caba, version);
+            temp.right(version).set_parent(caba, version);
         }
 
         temp.set_parent(caba.parent(version), version);
         if caba.parent(version).is_null() {
             self.root = temp;
         } else if caba.is_right_child(version) {
-            caba.parent(version)
-                .set_right(temp, version);
+            caba.parent(version).set_right(temp, version);
         } else {
-            caba.parent(version)
-                .set_left(temp, version);
+            caba.parent(version).set_left(temp, version);
         }
 
         temp.set_right(caba, version);
@@ -1233,7 +1240,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
             self.successor_helper(z, version)
         };
 
-        let mut x = if y.left(version).is_null() {
+        let mut x = if !y.left(version).is_null() {
             y.left(version)
         } else {
             y.right(version)
@@ -1948,7 +1955,6 @@ mod tree_tests {
     }
 
     #[test]
-    #[ignore]
     fn test_multiple_inserts_and_deletions() {
         // Arrange
         let mut gojo: Gojo<usize, usize> = Gojo::default();
