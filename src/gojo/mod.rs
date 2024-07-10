@@ -764,7 +764,7 @@ impl<'a, K: Ord + Default + Clone + 'a, V: Default + Clone + 'a> Iterator for Go
 
 #[derive(Debug)]
 pub struct Gojo<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> {
-    pub root: NodePtr<K, V>,
+    root: NodePtr<K, V>,
     len: usize,
     curr_version: usize,
     roots: Vec<(NodePtr<K, V>, usize)>,
@@ -850,6 +850,14 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         self.curr_version
     }
 
+    pub fn get_root(&self, version: usize) -> NodePtr<K, V> {
+        if version > self.latest_version() {
+            return NodePtr::null();
+        }
+
+        self.roots[version].0
+    }
+
     pub fn is_empty(&self, version: usize) -> bool {
         if version > self.latest_version() {
             return true;
@@ -886,13 +894,37 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         y
     }
 
-    pub fn successor(&self, k: &K, version: usize) -> Option<&V> {
-        let node = self.find_node(k, version);
-        if node.is_null() {
+    pub fn successor_by_key(&self, k: &K, version: usize) -> Option<&V> {
+        if version > self.latest_version() {
             return None;
         }
 
-        let succ = self.successor_helper(node, version);
+        let root = self.roots[version].0;
+        let mut x = root;
+        unsafe {
+            loop {
+                let next = match k.cmp(&(*x.pointer).key) {
+                    Ordering::Less => x.left(version),
+                    _ => x.right(version),
+                };
+                if next.is_null() {
+                    break;
+                }
+                x = next;
+            }
+        }
+
+        if x.is_null() {
+            return None;
+        }
+
+        unsafe {
+            if let Ordering::Less = k.cmp(&(*x.pointer).key) {
+                return Some(&(*x.pointer).value);
+            }
+        }
+
+        let succ = self.successor_by_node(x, version);
         if succ.is_null() {
             return None;
         }
@@ -900,7 +932,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         unsafe { Some(&(*succ.pointer).value) }
     }
 
-    fn successor_helper(&self, node: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
+    pub fn successor_by_node(&self, node: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
         let mut x = node;
         if !node.right(version).is_null() {
             return x.right(version).min_node(version);
@@ -1010,9 +1042,9 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
                 self.left_rotate(dude.parent(version).parent(version));
             }
         }
-        let mut possible_new_root = self.root.get_last_copy(version);
+        let mut possible_new_root = self.root;
         possible_new_root.set_black_color(version);
-        self.root = possible_new_root;
+        self.root = possible_new_root.get_last_copy(version);
     }
 
     pub fn insert(&mut self, k: K, v: V) {
@@ -1068,7 +1100,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         self.roots.push((self.root, new_length));
     }
 
-    fn find_node(&self, k: &K, version: usize) -> NodePtr<K, V> {
+    pub fn find_node(&self, k: &K, version: usize) -> NodePtr<K, V> {
         if version > self.curr_version {
             return NodePtr::null();
         }
@@ -1237,7 +1269,7 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         let y = if z.left(version).is_null() || z.right(version).is_null() {
             z
         } else {
-            self.successor_helper(z, version)
+            self.successor_by_node(z, version)
         };
 
         let mut x = if !y.left(version).is_null() {
@@ -1818,7 +1850,7 @@ mod tree_tests {
         gojo.insert(2, 2);
         gojo.insert(3, 3);
 
-        let succ = gojo.successor(&1, version);
+        let succ = gojo.successor_by_key(&1, version);
 
         // Assert
         assert!(succ.is_some());
@@ -1837,7 +1869,7 @@ mod tree_tests {
         gojo.insert(2, 2);
         gojo.insert(3, 3);
 
-        let succ = gojo.successor(&2, version);
+        let succ = gojo.successor_by_key(&2, version);
 
         // Assert
         assert!(succ.is_some());
@@ -1855,7 +1887,7 @@ mod tree_tests {
         gojo.insert(2, 2);
         gojo.insert(3, 3);
 
-        let succ = gojo.successor(&3, version);
+        let succ = gojo.successor_by_key(&3, version);
 
         // Assert
         assert!(succ.is_none());
@@ -1871,8 +1903,8 @@ mod tree_tests {
         gojo.insert(2, 2);
         gojo.insert(3, 3);
 
-        let version_two_succ = gojo.successor(&2, 2);
-        let version_tree_succ = gojo.successor(&2, 3);
+        let version_two_succ = gojo.successor_by_key(&2, 2);
+        let version_tree_succ = gojo.successor_by_key(&2, 3);
 
         // Assert
         assert!(version_two_succ.is_none());
