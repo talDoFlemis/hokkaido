@@ -7,7 +7,7 @@ use hokkaido::gojo::{
 use anyhow::{bail, Result};
 
 #[test]
-fn only_insert_and_print() -> Result<()> {
+fn random_only_insert() -> Result<()> {
     // Arrange
     let str = include_str!("./inputs/01.txt");
     let p = ParserVagaba::default();
@@ -56,6 +56,79 @@ fn only_insert_and_print() -> Result<()> {
         assert_eq!(expected.value, actual.value, "for item {}", expected.key);
         assert_eq!(expected.color, actual.color, "for item {}", expected.key);
         assert_eq!(expected.depth, actual.depth, "for item {}", expected.key);
+    }
+
+    Ok(())
+}
+
+#[test]
+fn successor() -> Result<()> {
+    let str = include_str!("./inputs/02.txt");
+    let p = ParserVagaba::default();
+    let mut gojo: Gojo<i32, i32> = Gojo::default();
+    let expecteds_succ = [
+        None,
+        Some(&20),
+        Some(&20),
+        Some(&19),
+        Some(&19),
+        Some(&18),
+        Some(&18),
+        Some(&17),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&6),
+        Some(&7),
+        Some(&7),
+        Some(&7),
+        Some(&7),
+        Some(&7),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+        Some(&5),
+    ];
+
+    // Act
+    let stms = p.parse_lines(str)?;
+
+    for stm in stms {
+        match stm {
+            gojo::parser::Statement::Insert(value) => {
+                gojo.insert(value, value);
+            }
+            gojo::parser::Statement::Remove(value) => {
+                gojo.college_remove(&value);
+            }
+            _ => bail!("Should not come here"),
+        }
+    }
+
+    // Assert
+    for (idx, &expected) in expecteds_succ.iter().enumerate() {
+        let version = idx + 1;
+        let actual = gojo.successor_by_key(&4, version);
+        assert_eq!(
+            expected, actual,
+            "for item {:?} in version {}",
+            expected, version
+        );
     }
 
     Ok(())
