@@ -434,7 +434,7 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         // Update parent back pontairos that can have a new root
         if *self == bk_ptr_parent.left(version) {
             bk_ptr_parent.set_left(new_node_ptr, version);
-        } else {
+        } else if *self == bk_ptr_parent.right(version) {
             bk_ptr_parent.set_right(new_node_ptr, version);
         };
     }
