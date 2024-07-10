@@ -55,7 +55,7 @@ fn process_statements(stms: Vec<Statement>) -> Result<String> {
                     version
                 };
 
-                match gojo.successor(&value, real_version) {
+                match gojo.successor_by_key(&value, real_version) {
                     Some(succ) => str_list.push(format!("{succ}")),
                     None => str_list.push(INFINITE_KEYWORD.to_string()),
                 }
