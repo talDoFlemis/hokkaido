@@ -1210,110 +1210,118 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         key
     }
 
-    unsafe fn delete_fixup(&mut self, x: NodePtr<K, V>) {
-        let mut caba = x;
+    unsafe fn delete_fixup(&mut self, caba: NodePtr<K, V>) {
+        let mut x = caba;
         let version = self.curr_version;
-        while caba != self.root && caba.is_black_color(version) {
-            if caba.is_left_child(version) {
-                let mut w = x.parent(version).right(version);
+
+        while x != self.root && x.is_black_color(version) {
+            if x.is_left_child(version) {
+                let mut brother = x.parent(version).right(version);
 
                 // Case 1
-                if w.is_red_color(version) {
-                    w.set_black_color(version);
-                    caba.parent(version).set_red_color(version);
-                    self.left_rotate(caba.parent(version));
-                    w = caba.parent(version).right(version);
+                if brother.is_red_color(version) {
+                    brother.set_black_color(version);
+                    x.parent(version).set_red_color(version);
+                    self.left_rotate(x.parent(version));
+                    brother = x.parent(version).right(version);
                 }
 
                 // Case 2
-                if w.left(version).is_black_color(version)
-                    && w.right(version).is_black_color(version)
+                if brother.left(version).is_black_color(version)
+                    && brother.right(version).is_black_color(version)
                 {
-                    w.set_red_color(version);
-                    caba = caba.parent(version);
+                    brother.set_red_color(version);
+                    x = x.parent(version);
                 }
                 // Case 3
-                else if w.right(version).is_black_color(version) {
-                    w.left(version).set_black_color(version);
-                    w.set_black_color(version);
-                    self.right_rotate(w);
-                    w = caba.parent(version).right(version);
-                }
+                else {
+                    if brother.right(version).is_black_color(version) {
+                        brother.left(version).set_black_color(version);
+                        brother.set_red_color(version);
+                        self.right_rotate(brother);
+                        brother = x.parent(version).right(version);
+                    }
 
-                // Case 4
-                w.set_color(caba.parent(version).get_color(version), version);
-                caba.parent(version).set_black_color(version);
-                w.right(version).set_black_color(version);
-                self.left_rotate(caba.parent(version));
-                caba = self.root;
+                    // Case 4
+                    brother.set_color(x.parent(version).get_color(version), version);
+                    x.parent(version).set_black_color(version);
+                    brother.right(version).set_black_color(version);
+                    self.left_rotate(x.parent(version));
+                    x = self.root;
+                }
             } else {
-                let mut w = x.parent(version).left(version);
+                let mut brother = x.parent(version).left(version);
 
-                // Case 5
-                if w.is_red_color(version) {
-                    w.set_black_color(version);
-                    caba.parent(version).set_red_color(version);
-                    self.right_rotate(caba.parent(version));
-                    w = caba.parent(version).left(version);
+                // Case 1
+                if brother.is_red_color(version) {
+                    brother.set_black_color(version);
+                    x.parent(version).set_red_color(version);
+                    self.right_rotate(x.parent(version));
+                    brother = x.parent(version).left(version);
                 }
 
-                // Case 6
-                if w.right(version).is_black_color(version)
-                    && w.left(version).is_black_color(version)
+                // Case 2
+                if brother.right(version).is_black_color(version)
+                    && brother.left(version).is_black_color(version)
                 {
-                    w.set_red_color(version);
-                    caba = caba.parent(version);
-                }
-                // Case 7
-                else if w.left(version).is_black_color(version) {
-                    w.right(version).set_black_color(version);
-                    w.set_black_color(version);
-                    self.left_rotate(w);
-                    w = caba.parent(version).left(version);
-                }
+                    brother.set_red_color(version);
+                    x = x.parent(version);
+                } else {
+                    // Case 3
+                    if brother.left(version).is_black_color(version) {
+                        brother.right(version).set_black_color(version);
+                        brother.set_red_color(version);
+                        self.left_rotate(brother);
+                        brother = x.parent(version).left(version);
+                    }
 
-                // Case 8
-                w.set_color(caba.parent(version).get_color(version), version);
-                caba.parent(version).set_black_color(version);
-                w.left(version).set_black_color(version);
-                self.right_rotate(caba.parent(version));
-                caba = self.root;
+                    // Case 4
+                    brother.set_color(x.parent(version).get_color(version), version);
+                    x.parent(version).set_black_color(version);
+                    brother.left(version).set_black_color(version);
+                    self.right_rotate(x.parent(version));
+                    x = self.root;
+                }
             }
         }
 
-        caba.set_black_color(version);
+        x.set_black_color(version);
     }
 
     unsafe fn delete(&mut self, z: NodePtr<K, V>) -> (K, V) {
         let version = self.curr_version;
-        let y = if z.left(version).is_null() || z.right(version).is_null() {
-            z
-        } else {
-            self.successor_by_node(z, version)
-        };
 
-        let mut x = if !y.left(version).is_null() {
-            y.left(version)
-        } else {
-            y.right(version)
-        };
+        let mut y = z;
+        let mut x;
+        let mut original_y_color = y.get_color(version);
 
-        x.set_parent(y.parent(version), version);
-
-        if y.parent(version).is_null() {
-            self.root = x;
-        } else if y.is_left_child(version) {
-            y.parent(version).set_left(x, version);
+        if z.left(version).is_null() {
+            x = z.right(version);
+            self.transplant(z, x);
+        } else if z.right(version).is_null() {
+            x = z.left(version);
+            self.transplant(z, x)
         } else {
-            y.parent(version).set_right(x, version);
+            y = self.successor_by_node(z, version);
+            x = y.right(version);
+            original_y_color = y.get_color(version);
+
+            if y.parent(version) == x {
+                x.set_parent(y, version);
+            } else {
+                self.transplant(y, x);
+                y.set_right(z.right(version), version);
+                y.right(version).set_parent(y, version);
+            }
+
+            self.transplant(z, y);
+            y.set_left(z.left(version), version);
+            z.left(version).set_parent(y, version);
+
+            y.set_color(z.get_color(version), version);
         }
 
-        if y != z {
-            (*z.pointer).key = (*y.pointer).key.clone();
-            (*z.pointer).value = (*y.pointer).value.clone();
-        }
-
-        if y.is_black_color(version) {
+        if original_y_color == Color::Black {
             self.delete_fixup(x);
         }
 
@@ -1323,6 +1331,21 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
             drop_in_place(y.pointer);
         }
         (key, value)
+    }
+
+    fn transplant(&mut self, u: NodePtr<K, V>, other: NodePtr<K, V>) {
+        let version = self.curr_version;
+        let mut v = other;
+
+        if u.parent(version).is_null() {
+            self.root = v;
+        } else if u.is_left_child(version) {
+            u.parent(version).set_left(v, version)
+        } else {
+            u.parent(version).set_right(v, version)
+        }
+
+        v.set_parent(u.parent(version), version);
     }
 
     fn first_child(&self, root: NodePtr<K, V>, version: usize) -> NodePtr<K, V> {
