@@ -340,13 +340,15 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
     }
 
     fn is_left_child(&self, version: usize) -> bool {
-        let other = self.parent(version).left(version);
-        other == *self
+        let ptr = self.get_last_copy(version);
+        let other = ptr.parent(version).left(version);
+        other == ptr
     }
 
     fn is_right_child(&self, version: usize) -> bool {
-        let other = self.parent(version).right(version);
-        other == *self
+        let ptr = self.get_last_copy(version);
+        let other = ptr.parent(version).right(version);
+        other == ptr
     }
 
     fn min_node(self, version: usize) -> NodePtr<K, V> {
@@ -403,24 +405,27 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
         match mod_data {
             ModData::Parent(p) => {
                 (*new_node_ptr.pointer).parent = p;
+                (*new_node_ptr.pointer).bk_ptr_parent = p;
             }
             ModData::Left(l) => {
                 (*new_node_ptr.pointer).left = l;
+                (*new_node_ptr.pointer).bk_ptr_left = l;
             }
             ModData::Right(r) => {
                 (*new_node_ptr.pointer).right = r;
+                (*new_node_ptr.pointer).bk_ptr_right = r;
             }
             ModData::Col(c) => (*new_node_ptr.pointer).color = c,
         }
 
         // Update left back pontairos
-        let mut bk_ptr_left = (*self.pointer).bk_ptr_left;
+        let mut bk_ptr_left = (*new_node_ptr.pointer).bk_ptr_left;
         if !bk_ptr_left.is_null() && bk_ptr_left.is_left_child(version) {
             bk_ptr_left.set_parent(new_node_ptr, version);
         }
 
         // Update right back pontairos
-        let mut bk_ptr_right = (*self.pointer).bk_ptr_right;
+        let mut bk_ptr_right = (*new_node_ptr.pointer).bk_ptr_right;
         if !bk_ptr_right.is_null() && bk_ptr_right.is_right_child(version) {
             bk_ptr_right.set_parent(new_node_ptr, version);
         }
@@ -465,7 +470,9 @@ impl<K: Ord + Clone + Default, V: Clone + Default> NodePtr<K, V> {
 
     fn parent(&self, version: usize) -> NodePtr<K, V> {
         if self.is_null() {
-            return *self;
+            unsafe {
+                return (*self.pointer).parent;
+            }
         }
         unsafe {
             let ptr = self.get_last_copy(version);
@@ -824,6 +831,9 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
         nil.null = true;
         unsafe {
             (*(nil.pointer)).color = Color::Black;
+            (*(nil.pointer)).left = nil;
+            (*(nil.pointer)).right = nil;
+            (*(nil.pointer)).parent = nil;
         }
         let mut roots = Vec::with_capacity(predected_amount_of_ops);
         roots.push((nil, 0));
@@ -1184,10 +1194,20 @@ impl<K: Ord + Clone + Default + Debug, V: Clone + Default + Debug> Gojo<K, V> {
     pub fn college_remove(&mut self, k: &K) -> Option<V> {
         let node = self.find_node(k, self.curr_version);
         if node.is_null() {
+            self.curr_version += 1;
+            self.roots.push((self.root, self.len));
             return None;
         }
+
         self.len -= 1;
-        unsafe { Some(self.delete(node).1) }
+        let new_length = self.len;
+        self.curr_version += 1;
+        self.roots.push((self.root, new_length));
+
+        let key = unsafe { Some(self.delete(node).1) };
+        self.root = self.root.get_last_copy(self.curr_version);
+        self.roots[self.curr_version].0 = self.root.get_last_copy(self.curr_version);
+        key
     }
 
     unsafe fn delete_fixup(&mut self, x: NodePtr<K, V>) {
