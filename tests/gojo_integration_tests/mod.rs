@@ -93,8 +93,6 @@ fn successor() -> Result<()> {
         Some(&7),
         Some(&7),
         Some(&7),
-        Some(&7),
-        Some(&7),
         Some(&5),
         Some(&5),
         Some(&5),
