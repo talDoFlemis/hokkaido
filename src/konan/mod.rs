@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, rc::Rc};
 
 pub mod parser;
+pub mod cli;
 
 struct IntervalStats {
     valid_elements: usize,
