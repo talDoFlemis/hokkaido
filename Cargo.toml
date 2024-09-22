@@ -20,3 +20,8 @@ pretty_assertions = "1.4.0"
 name = "gojo"
 doc = false
 path = "src/bin/gojo.rs"
+
+[[bin]]
+name = "konan"
+doc = false
+path = "src/bin/konan.rs"
