@@ -9,6 +9,8 @@ authors = ["Said Rodrigues <coderflemis@gmail.com>"]
 [dependencies]
 anyhow = "1.0.86"
 clap = { version = "4.5.8", features = ["derive"] }
+itertools = "0.13.0"
+rand = "0.8.5"
 thiserror = "1.0.61"
 
 [dev-dependencies]
