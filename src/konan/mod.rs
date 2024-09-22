@@ -1,5 +1,7 @@
 use std::{cmp::Ordering, rc::Rc};
 
+pub mod parser;
+
 struct IntervalStats {
     valid_elements: usize,
     positions_in_vec: usize,
