@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, rc::Rc};
 
-pub mod parser;
 pub mod cli;
+pub mod parser;
 
 struct IntervalStats {
     valid_elements: usize,
@@ -476,10 +476,14 @@ impl<T: Ord> Konan<T> {
         self.rebalance(leaf.start, leaf.end);
     }
 
-    pub fn successor(&mut self, v: &T) -> Option<&T> {
+    pub fn successor(&self, v: &T) -> Option<&T> {
         if self.leaf_heads.is_empty() {
             return None;
         }
+
+        // Go find the two consecutive leaves that the first one is smaller or equal than a given value and
+        // the second one strictly greater than the value
+        // And using some kind of binary search
 
         let mut low: i32 = 0;
         let mut high: i32 = self.leaf_heads.len() as i32 - 1;
@@ -492,12 +496,20 @@ impl<T: Ord> Konan<T> {
             }
         }
 
+        // At this point high is lower than low and low can surpass the actual size of the leaf
+        // heads
         if low == self.leaf_heads.len() as i32 {
             low = self.leaf_heads.len() as i32 - 1;
         }
 
-        let real_low = self.leaf_head_to_data(low as usize);
-        let successor = self.data[real_low..self.data.len()]
+        if high < 0 {
+            high = 0;
+        }
+
+        // The low is actually high here
+        let first_leaf_start = self.leaf_head_to_data(high as usize);
+        let second_leaf_start = self.leaf_head_to_data(low as usize);
+        let successor = self.data[first_leaf_start..(second_leaf_start + self.segment_size)]
             .iter()
             .find(|x| x.is_some() && x.as_deref() > Some(v));
 
@@ -530,7 +542,7 @@ impl<'a, T: Ord> Iterator for KonanIter<'a, T> {
 #[cfg(test)]
 mod konan_test {
     use crate::konan::Konan;
-    use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::assert_eq;
     use rand::prelude::*;
 
     #[test]
@@ -600,7 +612,7 @@ mod konan_test {
 
     #[test]
     fn successor_on_empty_konan() {
-        let mut konan: Konan<i32> = Konan::new();
+        let konan: Konan<i32> = Konan::new();
 
         let expected_successor = None;
         assert_eq!(expected_successor, konan.successor(&10));
@@ -704,5 +716,39 @@ mod konan_test {
             .collect();
         let actual: Vec<i32> = konan.iter().copied().collect();
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn insertions_and_successors() {
+        let mut konan: Konan<i32> = Konan::new();
+
+        let inclusions = [1, 10, 2, 9, 3, 8, 4, 7, 5, 6];
+
+        for &i in inclusions.iter() {
+            konan.insert(i);
+        }
+
+        let successors = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+        let mut actual_successors = Vec::new();
+        for successor in successors.iter() {
+            let actual = konan.successor(successor);
+            actual_successors.push(actual);
+        }
+
+        let expected_successors = vec![
+            Some(&1),
+            Some(&2),
+            Some(&3),
+            Some(&4),
+            Some(&5),
+            Some(&6),
+            Some(&7),
+            Some(&8),
+            Some(&9),
+            Some(&10),
+        ];
+
+        assert_eq!(expected_successors, actual_successors);
     }
 }
